@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useCamera } from '../hooks/useCamera';
 import { useMicrophone } from '../hooks/useMicrophone';
 import type { ConnectionState } from '../types/messages';
@@ -163,8 +164,8 @@ function DeviceButton({
             </svg>
           </button>
 
-          {dropdownOpen && (
-            <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-48 max-h-40 overflow-y-auto rounded-xl bg-gray-900 border border-white/10 shadow-2xl z-[999] py-1">
+          {dropdownOpen && createPortal(
+            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-48 max-h-40 overflow-y-auto rounded-xl bg-gray-900 border border-white/10 shadow-2xl z-[9999] py-1">
               <p className="px-3 py-1.5 text-[10px] text-gray-600 uppercase tracking-wider">{label}设备</p>
               {devices.map((d) => (
                 <button
@@ -178,7 +179,8 @@ function DeviceButton({
                   {d.label || `设备 ${d.deviceId.slice(0, 8)}...`}
                 </button>
               ))}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       )}
