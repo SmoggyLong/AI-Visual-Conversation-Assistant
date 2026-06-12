@@ -2,39 +2,26 @@ package com.aivca.service.stt;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.websocket.*;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
-import java.security.KeyManagementException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.X509Certificate;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Base64;
 
 /**
- * 百度实时语音识别服务。
+ * 百度实时流式语音识别服务（Jakarta WebSocket Client）。
  *
- * 通过 WebSocket 连接百度 ASR 端点，流式发送 PCM 音频帧，
- * 实时接收中间结果 (MID_TEXT) 和最终结果 (FIN_TEXT)。
+ * 使用 Jakarta WebSocket API 连接百度 wss://vop.baidu.com/realtime_asr，
+ * 流式发送音频帧，实时接收 MID_TEXT（中间结果）和 FIN_TEXT（最终结果）。
  *
- * 使用方式：
- * <pre>{@code
- *   BaiduSttService stt = new BaiduSttService(apiKey, secretKey, objectMapper);
- *   stt.start(new SttCallback() {
- *       void onInterim(String t) { ... }
- *       void onFinal(String t)   { ... }
- *       void onError(String e)   { ... }
- *   });
- *   stt.sendAudio(pcmBytes);
- *   stt.finish();
- * }</pre>
+ * 替代了有 bug 的 JDK 24 java.net.http.WebSocket。
  */
 @Slf4j
 public class BaiduSttService implements SttService {
@@ -46,10 +33,10 @@ public class BaiduSttService implements SttService {
     private final String secretKey;
     private final ObjectMapper objectMapper;
 
-    private WebSocket ws;
     private SttCallback callback;
-    private final AtomicBoolean finished = new AtomicBoolean(false);
     private String accessToken;
+    private Session wsSession;
+    private boolean started;
 
     public BaiduSttService(String apiKey, String secretKey, ObjectMapper objectMapper) {
         this.apiKey = apiKey;
@@ -60,11 +47,11 @@ public class BaiduSttService implements SttService {
     @Override
     public void start(SttCallback callback) {
         this.callback = callback;
-        this.finished.set(false);
+        this.started = false;
 
         try {
             this.accessToken = fetchAccessToken();
-            log.debug("[STT] 百度 access_token 获取成功");
+            log.info("[STT] 百度 access_token 获取成功 | len={}", accessToken.length());
         } catch (Exception e) {
             log.error("[STT] 获取百度 access_token 失败", e);
             callback.onError("百度认证失败: " + e.getMessage());
@@ -76,19 +63,22 @@ public class BaiduSttService implements SttService {
 
     @Override
     public void sendAudio(byte[] pcmData) {
-        if (ws != null && !ws.isOutputClosed() && !finished.get()) {
-            ws.sendBinary(ByteBuffer.wrap(pcmData), true);
+        if (wsSession != null && wsSession.isOpen()) {
+            try {
+                wsSession.getBasicRemote().sendBinary(ByteBuffer.wrap(pcmData));
+            } catch (IOException e) {
+                log.warn("[STT] 发送音频帧失败: {}", e.getMessage());
+            }
         }
     }
 
     @Override
     public void finish() {
-        if (finished.compareAndSet(false, true) && ws != null && !ws.isOutputClosed()) {
+        if (wsSession != null && wsSession.isOpen()) {
             try {
-                String json = objectMapper.writeValueAsString(
-                        java.util.Map.of("type", "FINISH"));
-                ws.sendText(json, true);
-            } catch (Exception e) {
+                wsSession.getBasicRemote().sendText("{\"type\":\"FINISH\"}");
+                log.info("[STT] FINISH 帧已发送");
+            } catch (IOException e) {
                 log.error("[STT] 发送 FINISH 失败", e);
             }
         }
@@ -96,10 +86,8 @@ public class BaiduSttService implements SttService {
 
     @Override
     public void close() {
-        if (ws != null && !ws.isOutputClosed()) {
-            try {
-                ws.sendClose(WebSocket.NORMAL_CLOSURE, "done");
-            } catch (Exception ignored) {}
+        if (wsSession != null && wsSession.isOpen()) {
+            try { wsSession.close(); } catch (IOException ignored) {}
         }
     }
 
@@ -123,97 +111,85 @@ public class BaiduSttService implements SttService {
         log.debug("[STT] access_token 响应: HTTP {}", resp.statusCode());
 
         JsonNode root = objectMapper.readTree(resp.body());
-
         if (root.has("error")) {
             String err = root.get("error").asText() + " - " + root.get("error_description").asText("");
-            log.error("[STT] 获取 access_token 失败: {}", err);
             throw new IOException(err);
         }
-
-        String token = root.get("access_token").asText();
-        log.info("[STT] 百度 access_token 获取成功 | len={}", token.length());
-        return token;
+        return root.get("access_token").asText();
     }
 
     private void connectWebSocket() {
         try {
             String url = ASR_WS_URL + "?access_token=" + accessToken;
+            log.info("[STT] 连接百度 ASR WebSocket: {}", ASR_WS_URL);
 
-            // 使用默认 HttpClient，不传自定义 SSL（会导致 EOFException）
-            HttpClient http = HttpClient.newHttpClient();
-            WebSocket.Builder builder = http.newWebSocketBuilder();
+            WebSocketContainer container = ContainerProvider.getWebSocketContainer();
+            wsSession = container.connectToServer(new BaiduAsrEndpoint(), URI.create(url));
 
-            CompletableFuture<WebSocket> future = builder
-                    .buildAsync(URI.create(url), new WebSocket.Listener() {
-                        final StringBuilder jsonBuilder = new StringBuilder();
-
-                        @Override
-                        public void onOpen(WebSocket webSocket) {
-                            webSocket.request(1);
-                            // 发送 START 帧
-                            try {
-                                String startJson = objectMapper.writeValueAsString(java.util.Map.of(
-                                        "type", "START",
-                                        "data", java.util.Map.of(
-                                                "format", "pcm",
-                                                "rate", 16000,
-                                                "channels", 1
-                                        )
-                                ));
-                                webSocket.sendText(startJson, true);
-                                log.info("[STT] 百度 ASR WebSocket 已连接，START 帧已发送");
-                            } catch (Exception e) {
-                                log.error("[STT] 发送 START 帧失败", e);
-                                callback.onError("启动识别失败");
-                            }
-                        }
-
-                        @Override
-                        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-                            jsonBuilder.append(data);
-                            if (last) {
-                                String full = jsonBuilder.toString();
-                                jsonBuilder.setLength(0);
-                                try {
-                                    JsonNode root = objectMapper.readTree(full);
-                                    String type = root.has("type") ? root.get("type").asText() : "";
-                                    String result = root.has("result") ? root.get("result").asText("") : "";
-
-                                    if ("MID_TEXT".equals(type) || "PARTIAL_RESULT".equals(type)) {
-                                        if (!result.isEmpty()) callback.onInterim(result);
-                                    } else if ("FIN_TEXT".equals(type)) {
-                                        if (!result.isEmpty()) callback.onFinal(result);
-                                    } else if ("ERROR".equals(type)) {
-                                        String msg = root.has("message") ? root.get("message").asText() : "未知错误";
-                                        log.error("[STT] 百度返回错误: {}", msg);
-                                        callback.onError(msg);
-                                    }
-                                } catch (Exception e) {
-                                    log.warn("[STT] 解析百度响应失败: {}", full);
-                                }
-                            }
-                            webSocket.request(1);
-                            return null;
-                        }
-
-                        @Override
-                        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-                            log.info("[STT] 百度 WS 关闭 | code={} reason={}", statusCode, reason);
-                            return null;
-                        }
-
-                        @Override
-                        public void onError(WebSocket webSocket, Throwable error) {
-                            log.error("[STT] 百度 WS 错误", error);
-                            callback.onError("识别连接异常: " + error.getMessage());
-                        }
-                    });
-
-            ws = future.join();
-            log.info("[STT] 百度 ASR WebSocket 连接完成");
         } catch (Exception e) {
             log.error("[STT] 连接百度 ASR 失败", e);
             callback.onError("连接百度失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Jakarta WebSocket 客户端端点 —— 处理百度 ASR 消息。
+     */
+    @ClientEndpoint
+    public class BaiduAsrEndpoint {
+
+        @OnOpen
+        public void onOpen(Session session) {
+            log.info("[STT] 百度 ASR WebSocket 已连接");
+            try {
+                String startJson = objectMapper.writeValueAsString(java.util.Map.of(
+                        "type", "START",
+                        "data", java.util.Map.of(
+                                "format", "pcm",
+                                "rate", 16000,
+                                "channels", 1
+                        )
+                ));
+                session.getBasicRemote().sendText(startJson);
+                log.info("[STT] START 帧已发送");
+                started = true;
+            } catch (Exception e) {
+                log.error("[STT] 发送 START 帧失败", e);
+                callback.onError("启动识别失败");
+            }
+        }
+
+        @OnMessage
+        public void onMessage(String message) {
+            log.debug("[STT] 百度返回: {}", message.length() > 200 ? message.substring(0, 200) + "..." : message);
+            try {
+                JsonNode root = objectMapper.readTree(message);
+                String type = root.has("type") ? root.get("type").asText() : "";
+                String result = root.has("result") ? root.get("result").asText("") : "";
+
+                if ("MID_TEXT".equals(type) || "PARTIAL_RESULT".equals(type)) {
+                    if (!result.isEmpty()) callback.onInterim(result);
+                } else if ("FIN_TEXT".equals(type)) {
+                    if (!result.isEmpty()) callback.onFinal(result);
+                } else if ("ERROR".equals(type)) {
+                    String msg = root.has("message") ? root.get("message").asText() : "未知错误";
+                    log.error("[STT] 百度返回错误: {}", msg);
+                    callback.onError(msg);
+                }
+            } catch (Exception e) {
+                log.warn("[STT] 解析百度响应失败: {}", message);
+            }
+        }
+
+        @OnClose
+        public void onClose(Session session, CloseReason reason) {
+            log.info("[STT] 百度 WS 关闭 | code={} reason={}", reason.getCloseCode(), reason.getReasonPhrase());
+        }
+
+        @OnError
+        public void onError(Session session, Throwable error) {
+            log.error("[STT] 百度 WS 错误", error);
+            callback.onError("识别连接异常: " + error.getMessage());
         }
     }
 }

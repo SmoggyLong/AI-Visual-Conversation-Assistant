@@ -309,8 +309,19 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
         ConversationSession session = sessionManager.getByWsId(wsSession.getId());
         if (session == null) return;
 
+        String wsId = wsSession.getId();
         log.debug("[AUDIO] 用户{} | sessionId={}",
                 isStart ? "开始说话" : "停止说话", session.getSessionId());
+
+        if (!isStart) {
+            // 说话结束 → 触发 STT 识别
+            SttService stt = sttServices.get(wsId);
+            if (stt != null) {
+                log.info("[STT] 触发识别 | wsId={}", wsId);
+                stt.finish();
+                closeSttSession(wsId);
+            }
+        }
     }
 
     /**
