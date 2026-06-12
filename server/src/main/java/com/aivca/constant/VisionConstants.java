@@ -16,6 +16,6 @@ public final class VisionConstants {
     /** 图片分析提示词 */
     public static final String VISION_PROMPT = "用中文一句话描述这个画面中有什么，不要超过50个字。";
 
-    /** Vision 结果最大 token 数 */
-    public static final int MAX_TOKENS = 100;
+    /** Vision 结果最大 token 数（需覆盖 reasoning_tokens + 回答） */
+    public static final int MAX_TOKENS = 300;
 }
