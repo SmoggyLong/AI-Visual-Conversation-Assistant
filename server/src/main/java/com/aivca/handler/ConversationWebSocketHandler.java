@@ -265,7 +265,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                         sendMessage(wsSession, MessageType.RESPONSE_TEXT,
                                 ResponseTextPayload.builder()
                                         .messageId("stt_interim")
-                                        .role("assistant")
+                                        .role("interim")
                                         .content("[INTERIM]" + text)
                                         .conversationRound(session.getConversationRound())
                                         .build());
@@ -273,22 +273,25 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
 
                     @Override
                     public void onFinal(String text) {
-                        log.info("[STT] 最终识别结果 | wsId={} | text={}", wsId, text);
+                        log.info("[STT] 最终识别结果 | wsId={} | sessionId={} | text={}",
+                                wsId, session.getSessionId(), text);
                         session.addTurn(text, "");
                         sendMessage(wsSession, MessageType.RESPONSE_TEXT,
                                 ResponseTextPayload.builder()
                                         .messageId("stt_" + System.currentTimeMillis())
-                                        .role("assistant")
+                                        .role("user")
                                         .content(text)
                                         .conversationRound(session.getConversationRound())
                                         .build());
                         sendStatus(wsSession, StatusUpdatePayload.State.idle, "识别完成");
+                        closeSttSession(wsId);
                     }
 
                     @Override
                     public void onError(String message) {
                         log.warn("[STT] 识别错误 | wsId={} | msg={}", wsId, message);
                         sendStatus(wsSession, StatusUpdatePayload.State.error, "识别失败: " + message);
+                        closeSttSession(wsId);
                     }
                 });
             }
@@ -314,12 +317,11 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 isStart ? "开始说话" : "停止说话", session.getSessionId());
 
         if (!isStart) {
-            // 说话结束 → 触发 STT 识别
+            // 说话结束 → 触发 STT FINISH
             SttService stt = sttServices.get(wsId);
             if (stt != null) {
                 log.info("[STT] 触发识别 | wsId={}", wsId);
                 stt.finish();
-                closeSttSession(wsId);
             }
         }
     }
