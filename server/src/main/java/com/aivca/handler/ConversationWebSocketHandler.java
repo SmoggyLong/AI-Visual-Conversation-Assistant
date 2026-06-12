@@ -201,18 +201,27 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
      */
     private void handleAudioData(WebSocketSession wsSession, JsonNode root) {
         ConversationSession session = sessionManager.getByWsId(wsSession.getId());
-        if (session == null) return;
+        if (session == null) {
+            log.warn("[STT] 会话不存在，忽略音频 | wsId={}", wsSession.getId());
+            return;
+        }
 
         AudioDataPayload audio = objectMapper.convertValue(
                 root.get("payload"), AudioDataPayload.class);
-        if (audio == null || audio.getData() == null) return;
+        if (audio == null || audio.getData() == null) {
+            log.warn("[STT] 音频数据为空 | wsId={}", wsSession.getId());
+            return;
+        }
 
         String wsId = wsSession.getId();
 
         try {
+            byte[] pcmData = Base64.getDecoder().decode(audio.getData());
+
             // 首帧音频 → 创建 STT 会话
             SttService stt = sttServices.get(wsId);
             if (stt == null) {
+                log.info("[STT] 创建百度 STT 会话 | wsId={} | sessionId={}", wsId, session.getSessionId());
                 stt = new BaiduSttService(baiduApiKey, baiduSecretKey, objectMapper);
                 sttServices.put(wsId, stt);
                 session.setCurrentState(StatusUpdatePayload.State.listening);
@@ -221,7 +230,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 stt.start(new SttService.SttCallback() {
                     @Override
                     public void onInterim(String text) {
-                        // 中间结果 → 让前端实时显示
+                        log.debug("[STT] 中间结果 | wsId={} | text={}", wsId, text);
                         sendMessage(wsSession, MessageType.RESPONSE_TEXT,
                                 ResponseTextPayload.builder()
                                         .messageId("stt_interim")
@@ -233,7 +242,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
 
                     @Override
                     public void onFinal(String text) {
-                        // 最终结果 → 保存到会话
+                        log.info("[STT] 最终识别结果 | wsId={} | text={}", wsId, text);
                         session.addTurn(text, "");
                         sendMessage(wsSession, MessageType.RESPONSE_TEXT,
                                 ResponseTextPayload.builder()
@@ -243,24 +252,21 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                                         .conversationRound(session.getConversationRound())
                                         .build());
                         sendStatus(wsSession, StatusUpdatePayload.State.idle, "识别完成");
-                        closeSttSession(wsId);
                     }
 
                     @Override
                     public void onError(String message) {
-                        log.warn("[STT] 识别错误 wsId={} msg={}", wsId, message);
+                        log.warn("[STT] 识别错误 | wsId={} | msg={}", wsId, message);
                         sendStatus(wsSession, StatusUpdatePayload.State.error, "识别失败: " + message);
-                        closeSttSession(wsId);
                     }
                 });
             }
 
-            // 转发音频数据 → base64 解码 → byte[] → STT
-            byte[] pcmData = Base64.getDecoder().decode(audio.getData());
+            log.debug("[STT] 转发音频块 | wsId={} | bytes={}", wsId, pcmData.length);
             stt.sendAudio(pcmData);
 
         } catch (Exception e) {
-            log.error("[STT] 音频处理异常 wsId={}", wsId, e);
+            log.error("[STT] 音频处理异常 | wsId={}", wsId, e);
             closeSttSession(wsId);
         }
     }

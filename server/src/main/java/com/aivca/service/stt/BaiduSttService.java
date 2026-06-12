@@ -115,6 +115,7 @@ public class BaiduSttService implements SttService {
                 + "&client_id=" + apiKey
                 + "&client_secret=" + secretKey;
 
+        log.debug("[STT] 请求百度 access_token...");
         HttpClient http = HttpClient.newHttpClient();
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -123,8 +124,19 @@ public class BaiduSttService implements SttService {
                 .build();
 
         HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        log.debug("[STT] access_token 响应: HTTP {}", resp.statusCode());
+
         JsonNode root = objectMapper.readTree(resp.body());
-        return root.get("access_token").asText();
+
+        if (root.has("error")) {
+            String err = root.get("error").asText() + " - " + root.get("error_description").asText("");
+            log.error("[STT] 获取 access_token 失败: {}", err);
+            throw new IOException(err);
+        }
+
+        String token = root.get("access_token").asText();
+        log.info("[STT] 百度 access_token 获取成功 | len={}", token.length());
+        return token;
     }
 
     private void connectWebSocket() {
@@ -152,7 +164,7 @@ public class BaiduSttService implements SttService {
                                         )
                                 ));
                                 webSocket.sendText(startJson, true);
-                                log.debug("[STT] 百度 ASR WebSocket 已连接");
+                                log.info("[STT] 百度 ASR WebSocket 已连接，START 帧已发送");
                             } catch (Exception e) {
                                 log.error("[STT] 发送 START 帧失败", e);
                                 callback.onError("启动识别失败");
@@ -189,7 +201,7 @@ public class BaiduSttService implements SttService {
 
                         @Override
                         public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-                            log.debug("[STT] 百度 WS 关闭: {} {}", statusCode, reason);
+                            log.info("[STT] 百度 WS 关闭 | code={} reason={}", statusCode, reason);
                             return null;
                         }
 
@@ -201,6 +213,7 @@ public class BaiduSttService implements SttService {
                     });
 
             ws = future.join();
+            log.info("[STT] 百度 ASR WebSocket 连接完成");
         } catch (Exception e) {
             log.error("[STT] 连接百度 ASR 失败", e);
             callback.onError("连接百度失败: " + e.getMessage());
