@@ -61,7 +61,7 @@ export default function App() {
         ...captured.fullFrame,
         changed: true,
       });
-    }, 2000); // 每 2 秒截一帧，仅变化时发送
+    }, 1000); // 每 1 秒截一帧，仅变化时发送
 
     return () => clearInterval(timer);
   }, [camera.state.enabled, sendMessage]);
