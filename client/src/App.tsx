@@ -41,7 +41,7 @@ export default function App() {
   });
 
   // === 视频帧定时发送 ===
-  const prevHashRef = useRef<string | null>(null);
+  const prevPixelsRef = useRef<ImageData | null>(null);
 
   useEffect(() => {
     if (!camera.state.enabled) return;
@@ -51,10 +51,9 @@ export default function App() {
       const captured = captureFrame(camera.videoRef.current, 640);
       if (!captured) return;
 
-      const changed = hasFrameChanged(captured.thumbnailHash, prevHashRef.current);
-      prevHashRef.current = captured.thumbnailHash;
+      const changed = hasFrameChanged(captured.thumbPixels, prevPixelsRef.current);
+      prevPixelsRef.current = captured.thumbPixels;
 
-      // 画面无变化 → 不发请求，节省带宽
       if (!changed) return;
 
       sendMessage('FRAME_DATA', {
