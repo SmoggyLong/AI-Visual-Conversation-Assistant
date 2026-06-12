@@ -2,9 +2,6 @@ import type { FrameDataPayload } from '../types/messages';
 
 /**
  * 从 video 元素截取当前帧，返回完整 JPEG 帧和 64x64 缩略图像素数据。
- *
- * 帧差检测不再用哈希，改用 64x64 缩略图的像素级比对 + 变化比例阈值，
- * 解决摄像头传感器噪声导致的误判。
  */
 export function captureFrame(
   video: HTMLVideoElement,
@@ -30,7 +27,7 @@ export function captureFrame(
   // Canvas → JPEG base64（quality=0.7），去掉 data:image 前缀
   const fullData = fullCanvas.toDataURL('image/jpeg', 0.7);
 
-  // ===== 缩略图：64x64 用于像素对比 =====
+  // ===== 缩略图：64x64 用于帧差检测 =====
   const thumbCanvas = document.createElement('canvas');
   thumbCanvas.width = 64;
   thumbCanvas.height = 64;
@@ -52,46 +49,50 @@ export function captureFrame(
 }
 
 /**
- * 像素级帧差检测。
+ * 帧差检测 —— 量化像素哈希对比。
  *
- * 比较两帧 64x64 缩略图的每个像素 RGB 值，
- * 单像素任一通道差值 >10 视为"变化像素"，
- * 变化像素占比超过 threshold 才视为画面变化。
+ * 问题：之前用 toDataURL('image/jpeg') 的字节计算哈希，JPEG 压缩器（DCT + Huffman）
+ * 对传感器噪声（±1-3 RGB）极其敏感，微小的像素波动会导致完全不同的字节流，
+ * 从而产生完全不同的哈希值，导致静态画面也被误判为"有变化"。
  *
- * 这样摄像头传感器噪声（微小波动）不会被误判为变化。
+ * 修复：直接在 64x64 的原始像素数据上计算哈希，并在计算前将 RGB 量化到 8 个级别
+ * （0-31→0, 32-63→1, ..., 224-255→7）。传感器噪声 ±3 不会跨越量化边界，
+ * 因此静态画面产生相同的哈希值；而真正的场景变化（物体移动、光线变化）会跨越边界，
+ * 产生不同的哈希值。
  *
  * @param currentPixels   当前帧的 64x64 ImageData
  * @param previousPixels  上一帧的 64x64 ImageData（首次为 null）
- * @param threshold       变化像素占比阈值，默认 0.02（2%）
  * @returns true=画面有显著变化
  */
 export function hasFrameChanged(
   currentPixels: ImageData,
-  previousPixels: ImageData | null,
-  threshold: number = 0.02
+  previousPixels: ImageData | null
 ): boolean {
-  if (!previousPixels) return true; // 首帧
-
-  const data1 = currentPixels.data;
-  const data2 = previousPixels.data;
-  const totalPixels = data1.length / 4;
-  let diffCount = 0;
-
-  for (let i = 0; i < data1.length; i += 4) {
-    const dr = Math.abs(data1[i] - data2[i]);
-    const dg = Math.abs(data1[i + 1] - data2[i + 1]);
-    const db = Math.abs(data1[i + 2] - data2[i + 2]);
-    if (dr > 10 || dg > 10 || db > 10) {
-      diffCount++;
-    }
-  }
-
-  const ratio = diffCount / totalPixels;
-  return ratio > threshold;
+  if (!previousPixels) return true;
+  return quantizedHash(currentPixels) !== quantizedHash(previousPixels);
 }
 
 /**
- * 像素校验和 —— 用于后端缓存去重（替代图片哈希）。
+ * 对 64x64 像素数据做量化哈希。
+ * RGB 每通道量化到 8 级（除以 32），滤除传感器噪声 ±15，
+ * 只保留宏观的颜色变化。
+ */
+function quantizedHash(pixels: ImageData): number {
+  const data = pixels.data;
+  let hash = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    // 量化：256 级 → 8 级（0-7），噪声 ±15 不会跨级
+    const r = Math.floor(data[i] / 32);
+    const g = Math.floor(data[i + 1] / 32);
+    const b = Math.floor(data[i + 2] / 32);
+    // 3 个 3-bit 值合并为 9-bit，混入哈希
+    hash = ((hash << 5) - hash + (r << 6 | g << 3 | b)) | 0;
+  }
+  return hash;
+}
+
+/**
+ * 像素校验和 —— 用于后端缓存去重。
  */
 function pixelChecksum(pixels: ImageData): string {
   let sum = 0;
