@@ -3,8 +3,6 @@ package com.aivca.service.stt;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.java_websocket.client.WebSocketClient;
-import org.java_websocket.handshake.ServerHandshake;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -12,22 +10,21 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * 百度实时流式语音识别服务（org.java-websocket 实现）。
+ * 百度短语音识别服务（REST API）。
  *
- * 通过纯 Java WebSocket 客户端连接百度 wss://vop.baidu.com/realtime_asr，
- * 流式发送 PCM 音频帧，实时接收中间/最终结果。
- *
- * token 放在 START 帧中，URL 不带参数。
+ * Baidu WSS 在国内网络环境下不可用，改用 HTTP POST /server_api。
+ * 一句话说完后发送完整 PCM 音频，返回识别文字。
  */
 @Slf4j
 public class BaiduSttService implements SttService {
 
     private static final String TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token";
-    private static final String ASR_WS_URL = "wss://vop.baidu.com/realtime_asr";
+    private static final String ASR_URL = "https://vop.baidu.com/server_api";
 
     private final String apiKey;
     private final String secretKey;
@@ -35,9 +32,7 @@ public class BaiduSttService implements SttService {
 
     private SttCallback callback;
     private String accessToken;
-    private WebSocketClient wsClient;
-    private final ByteArrayOutputStream preStartBuffer = new ByteArrayOutputStream();
-    private volatile boolean started;
+    private final ByteArrayOutputStream audioBuffer = new ByteArrayOutputStream();
 
     public BaiduSttService(String apiKey, String secretKey, ObjectMapper objectMapper) {
         this.apiKey = apiKey;
@@ -48,49 +43,52 @@ public class BaiduSttService implements SttService {
     @Override
     public void start(SttCallback callback) {
         this.callback = callback;
-        this.started = false;
-        this.preStartBuffer.reset();
-
+        this.audioBuffer.reset();
         try {
             this.accessToken = fetchAccessToken();
             log.info("[STT] 百度 access_token 获取成功 | len={}", accessToken.length());
         } catch (Exception e) {
-            log.error("[STT] 获取百度 access_token 失败", e);
+            log.error("[STT] 获取 access_token 失败", e);
             callback.onError("百度认证失败: " + e.getMessage());
-            return;
         }
-        connectWebSocket();
     }
 
     @Override
     public void sendAudio(byte[] pcmData) {
-        if (started && wsClient != null && wsClient.isOpen()) {
-            // 已 START：直接发送
-            wsClient.send(ByteBuffer.wrap(pcmData));
-        } else {
-            // 未 START：暂存
-            try { preStartBuffer.write(pcmData); } catch (IOException ignored) {}
-        }
+        try { audioBuffer.write(pcmData); } catch (IOException ignored) {}
     }
 
     @Override
     public void finish() {
-        if (wsClient != null && wsClient.isOpen()) {
-            try {
-                wsClient.send("{\"type\":\"FINISH\"}");
-                log.info("[STT] FINISH 帧已发送");
-            } catch (Exception e) {
-                log.error("[STT] 发送 FINISH 失败", e);
-            }
+        byte[] pcmBytes = audioBuffer.toByteArray();
+        audioBuffer.reset();
+
+        if (pcmBytes.length == 0) {
+            callback.onFinal("");
+            return;
+        }
+
+        String base64Speech = Base64.getEncoder().encodeToString(pcmBytes);
+        log.info("[STT] 发起百度识别 | pcm={}B | base64={}B", pcmBytes.length, base64Speech.length());
+
+        // 推一个中间提示到字幕条
+        callback.onInterim("正在识别...");
+
+        try {
+            String result = callAsr(base64Speech, pcmBytes.length);
+            log.info("[STT] 识别结果: {}", result.isEmpty() ? "(空)" : result);
+            // 先推一个字幕条展示，再推最终结果
+            callback.onInterim(result);
+            callback.onFinal(result.isEmpty() ? "" : result);
+        } catch (Exception e) {
+            log.error("[STT] 识别请求失败", e);
+            callback.onError("识别失败: " + e.getMessage());
         }
     }
 
     @Override
     public void close() {
-        if (wsClient != null && wsClient.isOpen()) {
-            wsClient.close();
-        }
-        preStartBuffer.reset();
+        audioBuffer.reset();
     }
 
     // ==================== private ====================
@@ -106,94 +104,32 @@ public class BaiduSttService implements SttService {
         return root.get("access_token").asText();
     }
 
-    private void connectWebSocket() {
-        try {
-            log.info("[STT] 连接百度 ASR WebSocket: {}", ASR_WS_URL);
-            wsClient = new WebSocketClient(URI.create(ASR_WS_URL)) {
-                @Override
-                public void onOpen(ServerHandshake handshake) {
-                    log.info("[STT] 百度 ASR WebSocket 已连接 | status={}", handshake.getHttpStatus());
-                    // 发送 START 帧（token 放这里）
-                    sendStartFrame();
-                }
+    private String callAsr(String base64Speech, int rawLen) throws IOException, InterruptedException {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("format", "pcm");
+        json.put("rate", 16000);
+        json.put("channel", 1);
+        json.put("cuid", "aivca");
+        json.put("token", accessToken);
+        json.put("speech", base64Speech);
+        json.put("len", rawLen);
+        json.put("dev_pid", 1537);
 
-                @Override
-                public void onMessage(String message) {
-                    log.debug("[STT] 百度返回: {}", message.length() > 200 ? message.substring(0, 200) + "..." : message);
-                    try {
-                        JsonNode root = objectMapper.readTree(message);
-                        String type = root.has("type") ? root.get("type").asText() : "";
-                        String result = root.has("result") ? root.get("result").asText("") : "";
+        String body = objectMapper.writeValueAsString(json);
 
-                        if ("MID_TEXT".equals(type) || "PARTIAL_RESULT".equals(type)) {
-                            if (!result.isEmpty()) callback.onInterim(result);
-                        } else if ("FIN_TEXT".equals(type)) {
-                            if (!result.isEmpty()) {
-                                log.info("[STT] 最终识别结果: {}", result);
-                                callback.onFinal(result);
-                            }
-                        } else if ("ERROR".equals(type)) {
-                            String msg = root.has("message") ? root.get("message").asText() : "未知错误";
-                            log.error("[STT] 百度返回错误: {}", msg);
-                            callback.onError(msg);
-                        }
-                    } catch (Exception e) {
-                        log.warn("[STT] 解析百度响应失败: {}", message);
-                    }
-                }
+        HttpClient http = HttpClient.newHttpClient();
+        HttpResponse<String> resp = http.send(HttpRequest.newBuilder()
+                .uri(URI.create(ASR_URL))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
 
-                @Override
-                public void onClose(int code, String reason, boolean remote) {
-                    log.info("[STT] 百度 WS 关闭 | code={} reason={} remote={}", code, reason, remote);
-                }
+        log.debug("[STT] ASR 响应: HTTP {}", resp.statusCode());
 
-                @Override
-                public void onError(Exception ex) {
-                    log.error("[STT] 百度 WS 错误", ex);
-                    callback.onError("连接异常: " + ex.getMessage());
-                }
-            };
-            wsClient.connectBlocking();
-
-        } catch (Exception e) {
-            log.error("[STT] 连接百度 ASR 失败", e);
-            callback.onError("连接百度失败: " + e.getMessage());
-        }
-    }
-
-    private void sendStartFrame() {
-        try {
-            java.util.Map<String, Object> startData = new java.util.LinkedHashMap<>();
-            startData.put("format", "pcm");
-            startData.put("rate", 16000);
-            startData.put("channel", 1);
-            startData.put("token", accessToken);
-            startData.put("cuid", "aivca");
-
-            java.util.Map<String, Object> frame = new java.util.LinkedHashMap<>();
-            frame.put("type", "START");
-            frame.put("data", startData);
-
-            String json = objectMapper.writeValueAsString(frame);
-            wsClient.send(json);
-            log.info("[STT] START 帧已发送");
-            started = true;
-
-            // 发送累积的音频数据
-            flushBuffer();
-        } catch (Exception e) {
-            log.error("[STT] 发送 START 帧失败", e);
-            callback.onError("启动识别失败");
-        }
-    }
-
-    /** 发送 start 前累积的音频数据 */
-    private void flushBuffer() {
-        byte[] data = preStartBuffer.toByteArray();
-        preStartBuffer.reset();
-        if (data.length > 0 && wsClient != null && wsClient.isOpen()) {
-            wsClient.send(ByteBuffer.wrap(data));
-            log.debug("[STT] 补发累积音频 | bytes={}", data.length);
-        }
+        JsonNode root = objectMapper.readTree(resp.body());
+        if (root.has("err_no") && root.get("err_no").asInt() != 0)
+            throw new IOException("err_no=" + root.get("err_no").asInt() + " err_msg=" + root.get("err_msg").asText("?"));
+        if (root.has("result") && root.get("result").isArray() && root.get("result").size() > 0)
+            return root.get("result").get(0).asText().trim();
+        return "";
     }
 }
