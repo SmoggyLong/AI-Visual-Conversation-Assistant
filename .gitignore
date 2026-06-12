@@ -31,6 +31,7 @@ logs/
 
 # Docs (local only)
 docs/
+DESIGN.md
 
 # Temp
 *.tmp
