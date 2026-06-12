@@ -54,11 +54,14 @@ export default function App() {
       const changed = hasFrameChanged(captured.thumbnailHash, prevHashRef.current);
       prevHashRef.current = captured.thumbnailHash;
 
+      // 画面无变化 → 不发请求，节省带宽
+      if (!changed) return;
+
       sendMessage('FRAME_DATA', {
         ...captured.fullFrame,
-        changed,
+        changed: true,
       });
-    }, 2000); // 每 2 秒截一帧
+    }, 2000); // 每 2 秒截一帧，仅变化时发送
 
     return () => clearInterval(timer);
   }, [camera.state.enabled, sendMessage]);

@@ -197,7 +197,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 处理 FRAME_DATA 消息 —— 接收视频帧，检查帧差后缓存。
+     * 处理 FRAME_DATA 消息 —— 接收视频帧（仅画面变化时才发到此处）。
      * 后续接入 Vision API 进行画面分析。
      */
     private void handleFrameData(WebSocketSession wsSession, JsonNode root) {
@@ -208,22 +208,13 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 root.get("payload"), FrameDataPayload.class);
         if (frame == null) return;
 
-        if (frame.isChanged()) {
-            session.setCurrentState(StatusUpdatePayload.State.watching);
-            sendStatus(wsSession, StatusUpdatePayload.State.watching, "正在分析画面...");
-
-            if (frame.getImageChecksum() != null
-                    && !frame.getImageChecksum().equals(session.getCachedImageChecksum())) {
-                session.setCachedImageChecksum(frame.getImageChecksum());
-                log.debug("[FRAME] 收到新视频帧 | sessionId={} | size={}x{} | checksum={}",
-                        session.getSessionId(), frame.getWidth(), frame.getHeight(),
-                        frame.getImageChecksum().substring(0, Math.min(8, frame.getImageChecksum().length())));
-                // TODO: 后续接入 Vision API
-            } else {
-                log.debug("[FRAME] 帧差无变化，跳过分析 | sessionId={}", session.getSessionId());
-            }
-
-            session.setCurrentState(StatusUpdatePayload.State.idle);
+        if (frame.getImageChecksum() != null
+                && !frame.getImageChecksum().equals(session.getCachedImageChecksum())) {
+            session.setCachedImageChecksum(frame.getImageChecksum());
+            log.debug("[FRAME] 收到新视频帧 | sessionId={} | size={}x{} | checksum={}",
+                    session.getSessionId(), frame.getWidth(), frame.getHeight(),
+                    frame.getImageChecksum().substring(0, Math.min(8, frame.getImageChecksum().length())));
+            // TODO: feat/vision-api → 接入 Vision API 进行画面分析
         }
     }
 
