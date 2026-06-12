@@ -4,47 +4,44 @@ import com.aivca.model.enums.MessageType;
 import com.aivca.model.message.*;
 import com.aivca.model.session.ConversationSession;
 import com.aivca.service.SessionManager;
+import com.aivca.service.stt.SttService;
+import com.aivca.service.stt.BaiduSttService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * WebSocket 消息处理器 —— 接收客户端消息并路由到对应处理方法。
- *
- * 负责：
- * - WebSocket 连接生命周期管理（建立/关闭/异常）
- * - JSON 消息反序列化与类型路由
- * - 会话创建与 WebSocket 绑定
- * - 设备状态同步（摄像头/麦克风 开关通知）
- * - 心跳维护（PING/PONG）
- * - 状态推送与错误响应
- *
- * 不负责：
- * - 实际的 AI 推理（由后续 Orchestrator 处理）
- * - 帧的视觉分析（后续接入 Vision API）
- * - 音频的语音识别（后续接入 STT API）
- */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class ConversationWebSocketHandler extends TextWebSocketHandler {
 
-    /** 会话管理器 —— 负责业务会话的创建、查找和销毁 */
     private final SessionManager sessionManager;
-
-    /** JSON 序列化/反序列化工具 */
     private final ObjectMapper objectMapper;
+    private final String baiduApiKey;
+    private final String baiduSecretKey;
 
     /** 当前活跃的 WebSocket 连接，以 Spring WebSocket sessionId 为键 */
     private final Map<String, WebSocketSession> activeConnections = new ConcurrentHashMap<>();
+
+    /** 每个 wsId 对应的 STT 服务实例 */
+    private final Map<String, SttService> sttServices = new ConcurrentHashMap<>();
+
+    public ConversationWebSocketHandler(SessionManager sessionManager, ObjectMapper objectMapper,
+                                         @Value("${baidu.asr.api-key:}") String baiduApiKey,
+                                         @Value("${baidu.asr.secret-key:}") String baiduSecretKey) {
+        this.sessionManager = sessionManager;
+        this.objectMapper = objectMapper;
+        this.baiduApiKey = baiduApiKey;
+        this.baiduSecretKey = baiduSecretKey;
+    }
 
     /**
      * WebSocket 连接建立回调。
@@ -96,6 +93,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionClosed(WebSocketSession wsSession, CloseStatus status) {
         String wsId = wsSession.getId();
+        closeSttSession(wsId);
         activeConnections.remove(wsId);
         sessionManager.remove(wsId);
         log.info("[CONNECT] WebSocket 连接关闭 | wsId={} | 状态={} | 剩余连接={}",
@@ -199,8 +197,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 处理 AUDIO_DATA 消息 —— 接收音频数据块。
-     * 后续接入 Whisper STT 进行语音识别。
+     * 处理 AUDIO_DATA 消息 —— 流式转发音频到百度 STT。
      */
     private void handleAudioData(WebSocketSession wsSession, JsonNode root) {
         ConversationSession session = sessionManager.getByWsId(wsSession.getId());
@@ -208,17 +205,64 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
 
         AudioDataPayload audio = objectMapper.convertValue(
                 root.get("payload"), AudioDataPayload.class);
-        if (audio == null) return;
+        if (audio == null || audio.getData() == null) return;
 
-        session.setCurrentState(StatusUpdatePayload.State.listening);
-        sendStatus(wsSession, StatusUpdatePayload.State.listening, "正在识别语音...");
+        String wsId = wsSession.getId();
 
-        log.debug("[AUDIO] 收到音频数据 | sessionId={} | duration={}ms | sampleRate={}Hz | channels={}",
-                session.getSessionId(), (int) (audio.getDuration() * 1000),
-                audio.getSampleRate(), audio.getChannels());
-        // TODO: 后续接入 STT API
+        try {
+            // 首帧音频 → 创建 STT 会话
+            SttService stt = sttServices.get(wsId);
+            if (stt == null) {
+                stt = new BaiduSttService(baiduApiKey, baiduSecretKey, objectMapper);
+                sttServices.put(wsId, stt);
+                session.setCurrentState(StatusUpdatePayload.State.listening);
+                sendStatus(wsSession, StatusUpdatePayload.State.listening, "正在识别语音...");
 
-        session.setCurrentState(StatusUpdatePayload.State.idle);
+                stt.start(new SttService.SttCallback() {
+                    @Override
+                    public void onInterim(String text) {
+                        // 中间结果 → 让前端实时显示
+                        sendMessage(wsSession, MessageType.RESPONSE_TEXT,
+                                ResponseTextPayload.builder()
+                                        .messageId("stt_interim")
+                                        .role("assistant")
+                                        .content("[INTERIM]" + text)
+                                        .conversationRound(session.getConversationRound())
+                                        .build());
+                    }
+
+                    @Override
+                    public void onFinal(String text) {
+                        // 最终结果 → 保存到会话
+                        session.addTurn(text, "");
+                        sendMessage(wsSession, MessageType.RESPONSE_TEXT,
+                                ResponseTextPayload.builder()
+                                        .messageId("stt_" + System.currentTimeMillis())
+                                        .role("assistant")
+                                        .content(text)
+                                        .conversationRound(session.getConversationRound())
+                                        .build());
+                        sendStatus(wsSession, StatusUpdatePayload.State.idle, "识别完成");
+                        closeSttSession(wsId);
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        log.warn("[STT] 识别错误 wsId={} msg={}", wsId, message);
+                        sendStatus(wsSession, StatusUpdatePayload.State.error, "识别失败: " + message);
+                        closeSttSession(wsId);
+                    }
+                });
+            }
+
+            // 转发音频数据 → base64 解码 → byte[] → STT
+            byte[] pcmData = Base64.getDecoder().decode(audio.getData());
+            stt.sendAudio(pcmData);
+
+        } catch (Exception e) {
+            log.error("[STT] 音频处理异常 wsId={}", wsId, e);
+            closeSttSession(wsId);
+        }
     }
 
     /**
@@ -277,5 +321,13 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     private void sendError(WebSocketSession wsSession, ErrorPayload.ErrorCode code, String message) {
         sendMessage(wsSession, MessageType.ERROR,
                 ErrorPayload.builder().code(code).message(message).build());
+    }
+
+    /** 关闭并清理 STT 会话 */
+    private void closeSttSession(String wsId) {
+        SttService stt = sttServices.remove(wsId);
+        if (stt != null) {
+            try { stt.close(); } catch (Exception ignored) {}
+        }
     }
 }

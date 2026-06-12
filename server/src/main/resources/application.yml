@@ -5,6 +5,12 @@ spring:
   application:
     name: ai-visual-conversation
 
+# 百度语音识别 API 密钥（在 https://console.bce.baidu.com/ai/#/ai/speech 创建应用获取）
+baidu:
+  asr:
+    api-key: ${BAIDU_ASR_API_KEY:}
+    secret-key: ${BAIDU_ASR_SECRET_KEY:}
+
 logging:
   level:
     com.aivca: DEBUG
