@@ -49,16 +49,15 @@ export function captureFrame(
 }
 
 /**
- * 帧差检测 —— 量化像素哈希对比。
+ * 帧差检测 —— 像素校验和 + 容差比对。
  *
- * 问题：之前用 toDataURL('image/jpeg') 的字节计算哈希，JPEG 压缩器（DCT + Huffman）
- * 对传感器噪声（±1-3 RGB）极其敏感，微小的像素波动会导致完全不同的字节流，
- * 从而产生完全不同的哈希值，导致静态画面也被误判为"有变化"。
+ * 之前用哈希比对的问题：量化哈希对单像素变化过于敏感，
+ * 64×64=4096 个像素中只要有一个跨了量化边界，哈希就不同。
+ * 静态画面下传感器噪声导致每秒都有几个像素跨边界 → 哈希永远不同。
  *
- * 修复：直接在 64x64 的原始像素数据上计算哈希，并在计算前将 RGB 量化到 8 个级别
- * （0-31→0, 32-63→1, ..., 224-255→7）。传感器噪声 ±3 不会跨越量化边界，
- * 因此静态画面产生相同的哈希值；而真正的场景变化（物体移动、光线变化）会跨越边界，
- * 产生不同的哈希值。
+ * 改用像素 RGB 校验和 + 1.5% 容差：
+ * - 传感器噪声让校验和波动 < 1.5% → 视为无变化，不发送
+ * - 物体移动、光线剧变让校验和波动 >> 1.5% → 视为有变化，发送
  *
  * @param currentPixels   当前帧的 64x64 ImageData
  * @param previousPixels  上一帧的 64x64 ImageData（首次为 null）
@@ -69,36 +68,28 @@ export function hasFrameChanged(
   previousPixels: ImageData | null
 ): boolean {
   if (!previousPixels) return true;
-  return quantizedHash(currentPixels) !== quantizedHash(previousPixels);
+  const currentSum = pixelRgbSum(currentPixels);
+  const previousSum = pixelRgbSum(previousPixels);
+  // 差异超过 1.5% → 有变化
+  const diff = Math.abs(currentSum - previousSum) / Math.max(1, previousSum);
+  return diff > 0.015;
 }
 
 /**
- * 对 64x64 像素数据做量化哈希。
- * RGB 每通道量化到 8 级（除以 32），滤除传感器噪声 ±15，
- * 只保留宏观的颜色变化。
+ * 像素 RGB 总和（用于校验和对比）。
  */
-function quantizedHash(pixels: ImageData): number {
+function pixelRgbSum(pixels: ImageData): number {
+  let sum = 0;
   const data = pixels.data;
-  let hash = 0;
   for (let i = 0; i < data.length; i += 4) {
-    // 量化：256 级 → 8 级（0-7），噪声 ±15 不会跨级
-    const r = Math.floor(data[i] / 32);
-    const g = Math.floor(data[i + 1] / 32);
-    const b = Math.floor(data[i + 2] / 32);
-    // 3 个 3-bit 值合并为 9-bit，混入哈希
-    hash = ((hash << 5) - hash + (r << 6 | g << 3 | b)) | 0;
+    sum += data[i] + data[i + 1] + data[i + 2];
   }
-  return hash;
+  return sum;
 }
 
 /**
  * 像素校验和 —— 用于后端缓存去重。
  */
 function pixelChecksum(pixels: ImageData): string {
-  let sum = 0;
-  const data = pixels.data;
-  for (let i = 0; i < data.length; i += 4) {
-    sum += data[i] + data[i + 1] + data[i + 2];
-  }
-  return sum.toString(16);
+  return pixelRgbSum(pixels).toString(16);
 }
