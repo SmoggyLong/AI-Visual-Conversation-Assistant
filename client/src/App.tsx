@@ -41,7 +41,7 @@ export default function App() {
   });
 
   // === 视频帧定时发送 ===
-  const prevHashRef = useRef<string | null>(null);
+  const prevPixelsRef = useRef<ImageData | null>(null);
 
   useEffect(() => {
     if (!camera.state.enabled) return;
@@ -51,14 +51,16 @@ export default function App() {
       const captured = captureFrame(camera.videoRef.current, 640);
       if (!captured) return;
 
-      const changed = hasFrameChanged(captured.thumbnailHash, prevHashRef.current);
-      prevHashRef.current = captured.thumbnailHash;
+      const changed = hasFrameChanged(captured.thumbPixels, prevPixelsRef.current);
+      prevPixelsRef.current = captured.thumbPixels;
+
+      if (!changed) return;
 
       sendMessage('FRAME_DATA', {
         ...captured.fullFrame,
-        changed,
+        changed: true,
       });
-    }, 2000); // 每 2 秒截一帧
+    }, 1000);
 
     return () => clearInterval(timer);
   }, [camera.state.enabled, sendMessage]);
