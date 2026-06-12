@@ -4,11 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -143,7 +139,8 @@ public class BaiduSttService implements SttService {
         try {
             String url = ASR_WS_URL + "?access_token=" + accessToken;
 
-            HttpClient http = createInsecureHttpClient();
+            // 使用默认 HttpClient，不传自定义 SSL（会导致 EOFException）
+            HttpClient http = HttpClient.newHttpClient();
             WebSocket.Builder builder = http.newWebSocketBuilder();
 
             CompletableFuture<WebSocket> future = builder
@@ -218,19 +215,5 @@ public class BaiduSttService implements SttService {
             log.error("[STT] 连接百度 ASR 失败", e);
             callback.onError("连接百度失败: " + e.getMessage());
         }
-    }
-
-    /** 创建忽略 SSL 证书验证的 HttpClient（用于代理环境） */
-    private static HttpClient createInsecureHttpClient() throws NoSuchAlgorithmException, KeyManagementException {
-        TrustManager[] trustAll = new TrustManager[]{
-                new X509TrustManager() {
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                    public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                    public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-                }
-        };
-        SSLContext sslContext = SSLContext.getInstance("TLS");
-        sslContext.init(null, trustAll, new java.security.SecureRandom());
-        return HttpClient.newBuilder().sslContext(sslContext).build();
     }
 }
