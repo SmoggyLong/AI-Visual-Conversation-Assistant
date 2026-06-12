@@ -40,6 +40,10 @@ public class ZhipuVisionService implements VisionService {
             JsonNode root = HttpUtil.postJsonWithAuth(
                     VisionConstants.ZHIPU_VISION_URL, body, apiKey, objectMapper);
 
+            log.info("[VISION] 原始响应: {}", root.toString().length() > 500
+                    ? root.toString().substring(0, 500) + "..."
+                    : root.toString());
+
             JsonNode choices = root.get("choices");
             if (choices != null && choices.isArray() && choices.size() > 0) {
                 JsonNode message = choices.get(0).get("message");
