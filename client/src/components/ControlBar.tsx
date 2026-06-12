@@ -164,7 +164,7 @@ function DeviceButton({
           </button>
 
           {dropdownOpen && (
-            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-48 max-h-40 overflow-y-auto rounded-xl bg-gray-900 border border-white/10 shadow-2xl z-50 py-1">
+            <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-48 max-h-40 overflow-y-auto rounded-xl bg-gray-900 border border-white/10 shadow-2xl z-[999] py-1">
               <p className="px-3 py-1.5 text-[10px] text-gray-600 uppercase tracking-wider">{label}设备</p>
               {devices.map((d) => (
                 <button
