@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -100,7 +101,10 @@ public class BaiduSttService implements SttService {
                 + "&client_secret=" + secretKey;
 
         log.debug("[STT] 请求百度 access_token...");
-        HttpClient http = HttpClient.newHttpClient();
+        HttpClient http = HttpClient.newBuilder()
+                .proxy(java.net.ProxySelector.of(
+                        new java.net.InetSocketAddress("127.0.0.1", 7897)))
+                .build();
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json")
@@ -122,6 +126,10 @@ public class BaiduSttService implements SttService {
         try {
             String url = ASR_WS_URL + "?access_token=" + accessToken;
             log.info("[STT] 连接百度 ASR WebSocket: {}", ASR_WS_URL);
+
+            // 配置代理 — 国内环境需要通过 127.0.0.1:7897 访问百度 WSS
+            System.setProperty("https.proxyHost", "127.0.0.1");
+            System.setProperty("https.proxyPort", "7897");
 
             WebSocketContainer container = ContainerProvider.getWebSocketContainer();
             wsSession = container.connectToServer(new BaiduAsrEndpoint(), URI.create(url));
