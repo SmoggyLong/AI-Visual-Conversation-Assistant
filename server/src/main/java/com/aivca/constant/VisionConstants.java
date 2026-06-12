@@ -11,7 +11,7 @@ public final class VisionConstants {
     public static final String ZHIPU_VISION_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
 
     /** Vision 模型 */
-    public static final String VISION_MODEL = "glm-4v";
+    public static final String VISION_MODEL = "glm-4.6v";
 
     /** 图片分析提示词 */
     public static final String VISION_PROMPT = "用中文一句话描述这个画面中有什么，不要超过50个字。";

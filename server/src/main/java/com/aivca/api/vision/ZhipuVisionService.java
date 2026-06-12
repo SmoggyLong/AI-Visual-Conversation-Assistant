@@ -56,7 +56,8 @@ public class ZhipuVisionService implements VisionService {
                 return "";
             }
 
-            log.warn("[VISION] 响应格式异常: {}", root.toString());
+            log.warn("[VISION] 响应无有效内容 | body={}",
+                    root.toString().length() > 200 ? root.toString().substring(0, 200) : root.toString());
             return "";
 
         } catch (Exception e) {

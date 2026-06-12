@@ -40,6 +40,12 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     /** 每个 wsId 对应的 STT 服务实例 */
     private final Map<String, SttService> sttServices = new ConcurrentHashMap<>();
 
+    /** Vision 调用冷却记录：sessionId → 上次调用时间戳 */
+    private final Map<String, Long> visionCooldowns = new ConcurrentHashMap<>();
+
+    /** Vision 调用冷却间隔（毫秒） */
+    private static final long VISION_COOLDOWN_MS = 3000;
+
     /** 视觉分析服务（全局单例） */
     private final VisionService visionService;
 
@@ -227,21 +233,31 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                     session.getSessionId(), frame.getWidth(), frame.getHeight(),
                     frame.getImageChecksum().substring(0, Math.min(8, frame.getImageChecksum().length())));
 
-            // 调用 Vision API 分析画面
+            // 调用 Vision API 分析画面（带冷却）
             if (visionService != null && frame.getData() != null) {
-                sendStatus(wsSession, StatusUpdatePayload.State.watching, "正在分析画面...");
-                String description = visionService.describe(frame.getData());
-                if (!description.isEmpty()) {
-                    session.setCachedVisionDescription(description);
-                    sendMessage(wsSession, MessageType.VISION_RESULT,
-                            VisionResultPayload.builder()
-                                    .frameChecksum(frame.getImageChecksum())
-                                    .description(description)
-                                    .timestamp(System.currentTimeMillis())
-                                    .build());
-                    log.info("[VISION] 画面分析完成 | sessionId={}", session.getSessionId());
+                String sessionId = session.getSessionId();
+                long now = System.currentTimeMillis();
+                Long lastCall = visionCooldowns.get(sessionId);
+
+                if (lastCall == null || now - lastCall >= VISION_COOLDOWN_MS) {
+                    visionCooldowns.put(sessionId, now);
+                    sendStatus(wsSession, StatusUpdatePayload.State.watching, "正在分析画面...");
+                    String description = visionService.describe(frame.getData());
+                    if (!description.isEmpty()) {
+                        session.setCachedVisionDescription(description);
+                        sendMessage(wsSession, MessageType.VISION_RESULT,
+                                VisionResultPayload.builder()
+                                        .frameChecksum(frame.getImageChecksum())
+                                        .description(description)
+                                        .timestamp(now)
+                                        .build());
+                        log.info("[VISION] 画面分析完成 | sessionId={}", sessionId);
+                    }
+                    sendStatus(wsSession, StatusUpdatePayload.State.idle, "待机");
+                } else {
+                    log.debug("[VISION] 冷却中，跳过 | sessionId={} | cooldownLeft={}ms",
+                            sessionId, VISION_COOLDOWN_MS - (now - lastCall));
                 }
-                sendStatus(wsSession, StatusUpdatePayload.State.idle, "待机");
             }
         }
     }
