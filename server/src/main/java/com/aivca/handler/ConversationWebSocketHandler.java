@@ -7,7 +7,7 @@ import com.aivca.service.SessionManager;
 import com.aivca.api.stt.SttService;
 import com.aivca.api.stt.BaiduSttService;
 import com.aivca.api.vision.VisionService;
-import com.aivca.api.vision.OpenAiVisionService;
+import com.aivca.api.vision.ZhipuVisionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +32,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final String baiduApiKey;
     private final String baiduSecretKey;
-    private final String openAiApiKey;
+    private final String zhipuApiKey;
 
     /** 当前活跃的 WebSocket 连接，以 Spring WebSocket sessionId 为键 */
     private final Map<String, WebSocketSession> activeConnections = new ConcurrentHashMap<>();
@@ -50,16 +50,16 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
         Map<String, String> env = loadDotenv();
         this.baiduApiKey = env.getOrDefault("BAIDU_ASR_API_KEY", "");
         this.baiduSecretKey = env.getOrDefault("BAIDU_ASR_SECRET_KEY", "");
-        this.openAiApiKey = env.getOrDefault("OPENAI_API_KEY", "");
+        this.zhipuApiKey = env.getOrDefault("ZHIPU_API_KEY", "");
 
         log.info("[CONFIG] 百度 ASR | apiKey={}... | secretKey=****",
                 baiduApiKey.isEmpty() ? "(未设置)" : baiduApiKey.substring(0, Math.min(6, baiduApiKey.length())));
-        log.info("[CONFIG] OpenAI Vision | apiKey={}...",
-                openAiApiKey.isEmpty() ? "(未设置)" : openAiApiKey.substring(0, Math.min(6, openAiApiKey.length())));
+        log.info("[CONFIG] 智谱 Vision | apiKey={}...",
+                zhipuApiKey.isEmpty() ? "(未设置)" : zhipuApiKey.substring(0, Math.min(6, zhipuApiKey.length())));
 
-        this.visionService = openAiApiKey.isEmpty()
+        this.visionService = zhipuApiKey.isEmpty()
                 ? null
-                : new OpenAiVisionService(openAiApiKey, objectMapper);
+                : new ZhipuVisionService(zhipuApiKey, objectMapper);
     }
 
     /** 读取 .env 文件为 Map */
