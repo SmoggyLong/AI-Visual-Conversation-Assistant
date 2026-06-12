@@ -9,13 +9,16 @@ import com.aivca.service.stt.BaiduSttService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -34,13 +37,41 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     /** 每个 wsId 对应的 STT 服务实例 */
     private final Map<String, SttService> sttServices = new ConcurrentHashMap<>();
 
-    public ConversationWebSocketHandler(SessionManager sessionManager, ObjectMapper objectMapper,
-                                         @Value("${baidu.asr.api-key:}") String baiduApiKey,
-                                         @Value("${baidu.asr.secret-key:}") String baiduSecretKey) {
+    public ConversationWebSocketHandler(SessionManager sessionManager, ObjectMapper objectMapper) {
         this.sessionManager = sessionManager;
         this.objectMapper = objectMapper;
-        this.baiduApiKey = baiduApiKey;
-        this.baiduSecretKey = baiduSecretKey;
+
+        // 直接从 server/.env 读取百度密钥，不走 Spring 配置
+        Map<String, String> env = loadDotenv();
+        this.baiduApiKey = env.getOrDefault("BAIDU_ASR_API_KEY", "");
+        this.baiduSecretKey = env.getOrDefault("BAIDU_ASR_SECRET_KEY", "");
+        log.info("[CONFIG] 百度 ASR 配置 | apiKey={}... | secretKey={}...",
+                baiduApiKey.isEmpty() ? "(未设置)" : baiduApiKey.substring(0, Math.min(6, baiduApiKey.length())),
+                baiduSecretKey.isEmpty() ? "(未设置)" : "****");
+    }
+
+    /** 读取 .env 文件为 Map */
+    private static Map<String, String> loadDotenv() {
+        Map<String, String> map = new HashMap<>();
+        Path path = Paths.get(".env");
+        if (!Files.exists(path)) {
+            System.err.println("[DOTENV] .env 文件不存在: " + path.toAbsolutePath());
+            return map;
+        }
+        try {
+            for (String line : Files.readAllLines(path)) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String[] parts = line.split("=", 2);
+                if (parts.length == 2) {
+                    map.put(parts[0].trim(), parts[1].trim());
+                }
+            }
+            System.out.println("[DOTENV] 已加载 " + map.size() + " 个变量");
+        } catch (IOException e) {
+            System.err.println("[DOTENV] 读取失败: " + e.getMessage());
+        }
+        return map;
     }
 
     /**
