@@ -40,27 +40,47 @@ export default function App() {
     onStateChange: (payload) => sendMessage('MICROPHONE_CONTROL', payload),
   });
 
-  // === 视频帧定时发送 ===
+  // === 视频帧定时发送（5fps 连续帧 + 环形缓冲）===
   const prevPixelsRef = useRef<ImageData | null>(null);
+  const frameBufferRef = useRef<{ data: string; checksum: string; timestamp: number }[]>([]);
+  const BUFFER_MAX = 10;   // 保留最近 2 秒（5fps × 2s）
+  const SEND_COUNT = 5;    // 每次发送最近 1 秒（5 帧）
 
   useEffect(() => {
     if (!camera.state.enabled) return;
+    frameBufferRef.current = [];
 
     const timer = setInterval(() => {
       if (!camera.videoRef.current) return;
       const captured = captureFrame(camera.videoRef.current, 480);
       if (!captured) return;
 
+      const now = Date.now();
+
+      // 帧入缓冲
+      const buf = frameBufferRef.current;
+      buf.push({ data: captured.fullFrame.data!, checksum: captured.fullFrame.imageChecksum!, timestamp: now });
+      if (buf.length > BUFFER_MAX) frameBufferRef.current = buf.slice(-BUFFER_MAX);
+
+      // 帧差检测
       const changed = hasFrameChanged(captured.thumbPixels, prevPixelsRef.current);
       prevPixelsRef.current = captured.thumbPixels;
-
       if (!changed) return;
 
+      // 取最近 SEND_COUNT 帧，带时间偏移
+      const batch = frameBufferRef.current.slice(-SEND_COUNT);
       sendMessage('FRAME_DATA', {
-        ...captured.fullFrame,
+        format: 'jpeg',
         changed: true,
+        imageChecksum: captured.fullFrame.imageChecksum,
+        frames: batch.map((f, i) => ({
+          data: f.data,
+          format: 'jpeg',
+          checksum: f.checksum,
+          offsetMs: -(batch.length - 1 - i) * 200,  // 相对当前帧的时间偏移
+        })),
       });
-    }, 1000); // 每 1 秒截一帧，仅变化时发送
+    }, 200); // 200ms = 5fps
 
     return () => clearInterval(timer);
   }, [camera.state.enabled, sendMessage]);

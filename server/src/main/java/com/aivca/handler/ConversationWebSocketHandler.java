@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -226,40 +227,56 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 root.get("payload"), FrameDataPayload.class);
         if (frame == null) return;
 
-        if (frame.getImageChecksum() != null
-                && !frame.getImageChecksum().equals(session.getCachedImageChecksum())) {
-            session.setCachedImageChecksum(frame.getImageChecksum());
-            log.debug("[FRAME] 收到新视频帧 | sessionId={} | size={}x{} | checksum={}",
-                    session.getSessionId(), frame.getWidth(), frame.getHeight(),
-                    frame.getImageChecksum().substring(0, Math.min(8, frame.getImageChecksum().length())));
+        String sessionId = session.getSessionId();
+        String checksum = frame.getImageChecksum();
+        List<FrameDataPayload.FrameItem> batch = frame.getFrames();
 
-            // 调用 Vision API 分析画面（带冷却）
-            if (visionService != null && frame.getData() != null) {
-                String sessionId = session.getSessionId();
-                long now = System.currentTimeMillis();
-                Long lastCall = visionCooldowns.get(sessionId);
+        // 批次模式（连续帧分析）或单帧模式
+        boolean isBatch = batch != null && !batch.isEmpty();
+        if (!isBatch && checksum == null) return;
 
-                if (lastCall == null || now - lastCall >= VISION_COOLDOWN_MS) {
-                    visionCooldowns.put(sessionId, now);
-                    sendStatus(wsSession, StatusUpdatePayload.State.watching, "正在分析画面...");
-                    String description = visionService.describe(frame.getData());
-                    if (!description.isEmpty()) {
-                        session.setCachedVisionDescription(description);
-                        sendMessage(wsSession, MessageType.VISION_RESULT,
-                                VisionResultPayload.builder()
-                                        .frameChecksum(frame.getImageChecksum())
-                                        .description(description)
-                                        .timestamp(now)
-                                        .build());
-                        log.info("[VISION] 画面分析完成 | sessionId={}", sessionId);
-                    }
-                    sendStatus(wsSession, StatusUpdatePayload.State.idle, "待机");
-                } else {
-                    log.debug("[VISION] 冷却中，跳过 | sessionId={} | cooldownLeft={}ms",
-                            sessionId, VISION_COOLDOWN_MS - (now - lastCall));
-                }
-            }
+        long now = System.currentTimeMillis();
+        Long lastCall = visionCooldowns.get(sessionId);
+
+        if (lastCall != null && now - lastCall < VISION_COOLDOWN_MS) {
+            log.debug("[VISION] 冷却中，跳过 | sessionId={} | cooldownLeft={}ms",
+                    sessionId, VISION_COOLDOWN_MS - (now - lastCall));
+            return;
         }
+
+        if (!isBatch) {
+            // 单帧模式（向后兼容）— checksum 去重
+            if (checksum.equals(session.getCachedImageChecksum())) return;
+            session.setCachedImageChecksum(checksum);
+        }
+
+        visionCooldowns.put(sessionId, now);
+        sendStatus(wsSession, StatusUpdatePayload.State.watching,
+                isBatch ? "正在分析连续画面..." : "正在分析画面...");
+
+        String description;
+        if (isBatch) {
+            List<String> frames = batch.stream()
+                    .filter(f -> f.getData() != null)
+                    .map(FrameDataPayload.FrameItem::getData)
+                    .toList();
+            description = visionService.describeBatch(frames);
+            log.info("[VISION] 批量分析完成 | sessionId={} | frames={}", sessionId, frames.size());
+        } else {
+            description = visionService.describe(frame.getData());
+        }
+
+        if (!description.isEmpty()) {
+            session.setCachedVisionDescription(description);
+            sendMessage(wsSession, MessageType.VISION_RESULT,
+                    VisionResultPayload.builder()
+                            .frameChecksum(checksum)
+                            .description(description)
+                            .timestamp(now)
+                            .build());
+            log.info("[VISION] 画面分析完成 | sessionId={}", sessionId);
+        }
+        sendStatus(wsSession, StatusUpdatePayload.State.idle, "待机");
     }
 
     /**
