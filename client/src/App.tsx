@@ -48,7 +48,7 @@ export default function App() {
 
     const timer = setInterval(() => {
       if (!camera.videoRef.current) return;
-      const captured = captureFrame(camera.videoRef.current, 640);
+      const captured = captureFrame(camera.videoRef.current, 480);
       if (!captured) return;
 
       const changed = hasFrameChanged(captured.thumbPixels, prevPixelsRef.current);

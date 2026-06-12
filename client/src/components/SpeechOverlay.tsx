@@ -62,7 +62,7 @@ export function SpeechOverlay({
 
       {/* ===== 玻璃字幕条 ===== */}
       {isListening && !isNetworkUnavailable && (
-        <div className="w-full px-6 pb-6">
+        <div className="w-full px-6 pb-6 pointer-events-none">
           <div className={`
             relative rounded-2xl overflow-hidden
             bg-gray-950/30 backdrop-blur-2xl

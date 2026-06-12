@@ -5,7 +5,7 @@ import type { FrameDataPayload } from '../types/messages';
  */
 export function captureFrame(
   video: HTMLVideoElement,
-  maxWidth: number = 640
+  maxWidth: number = 480
 ): { fullFrame: FrameDataPayload; thumbPixels: ImageData } | null {
   if (video.readyState < 2) return null;
 
@@ -25,7 +25,7 @@ export function captureFrame(
   fctx.drawImage(video, 0, 0, fw, fh);
 
   // Canvas → JPEG base64（quality=0.7），去掉 data:image 前缀
-  const fullData = fullCanvas.toDataURL('image/jpeg', 0.7);
+  const fullData = fullCanvas.toDataURL('image/jpeg', 0.5);
 
   // ===== 缩略图：64x64 用于帧差检测 =====
   const thumbCanvas = document.createElement('canvas');
@@ -72,7 +72,7 @@ export function hasFrameChanged(
   const previousSum = pixelRgbSum(previousPixels);
   // 差异超过 1.5% → 有变化
   const diff = Math.abs(currentSum - previousSum) / Math.max(1, previousSum);
-  return diff > 0.03;
+  return diff > 0.016;
 }
 
 /**
