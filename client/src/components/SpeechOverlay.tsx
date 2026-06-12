@@ -30,7 +30,8 @@ export function SpeechOverlay({
       setDisplayText(interimText);
       setVisible(true);
     } else {
-      const timer = setTimeout(() => setVisible(false), 500);
+      // 空文本时延迟 3 秒再隐藏，让最终结果停留一会
+      const timer = setTimeout(() => setVisible(false), 3000);
       return () => clearTimeout(timer);
     }
   }, [interimText]);

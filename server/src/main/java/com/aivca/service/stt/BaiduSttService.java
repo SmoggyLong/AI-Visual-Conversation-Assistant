@@ -69,21 +69,34 @@ public class BaiduSttService implements SttService {
         }
 
         String base64Speech = Base64.getEncoder().encodeToString(pcmBytes);
-        log.info("[STT] 发起百度识别 | pcm={}B | base64={}B", pcmBytes.length, base64Speech.length());
+        log.info("[STT] 发起百度识别 | pcm={}B", pcmBytes.length);
 
-        // 推一个中间提示到字幕条
         callback.onInterim("正在识别...");
 
         try {
             String result = callAsr(base64Speech, pcmBytes.length);
             log.info("[STT] 识别结果: {}", result.isEmpty() ? "(空)" : result);
-            // 先推一个字幕条展示，再推最终结果
-            callback.onInterim(result);
-            callback.onFinal(result.isEmpty() ? "" : result);
+            // 逐字推前端，模拟流式打字机效果
+            streamText(result);
         } catch (Exception e) {
             log.error("[STT] 识别请求失败", e);
             callback.onError("识别失败: " + e.getMessage());
         }
+    }
+
+    /** 逐字模拟流式输出 */
+    private void streamText(String text) {
+        if (text.isEmpty()) {
+            callback.onFinal("");
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            sb.append(text.charAt(i));
+            callback.onInterim(sb.toString());
+            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+        }
+        callback.onFinal(text);
     }
 
     @Override
