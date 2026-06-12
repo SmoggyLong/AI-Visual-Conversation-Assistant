@@ -83,9 +83,7 @@ export function useCamera(options?: UseCameraOptions) {
         error: null,
       });
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      // stream 绑定由 useEffect 处理（等待 video 元素渲染后绑定）
 
       options?.onStateChange?.({ enabled: true, deviceId: settings.deviceId ?? undefined });
 
@@ -109,9 +107,6 @@ export function useCamera(options?: UseCameraOptions) {
     if (state.stream) {
       state.stream.getTracks().forEach((track) => track.stop());
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
     setState({
       enabled: false,
       deviceId: null,
@@ -121,6 +116,13 @@ export function useCamera(options?: UseCameraOptions) {
     });
     options?.onStateChange?.({ enabled: false });
   }, [state.stream, options]);
+
+  /** stream 变化时绑定到 video 元素（等待 React 渲染完成后执行） */
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.srcObject = state.stream ?? null;
+    }
+  }, [state.stream]);
 
   /** 切换开关 */
   const toggle = useCallback(async () => {
