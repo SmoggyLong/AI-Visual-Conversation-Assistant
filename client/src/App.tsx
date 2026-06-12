@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useCamera } from './hooks/useCamera';
 import { useMicrophone } from './hooks/useMicrophone';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -8,6 +8,7 @@ import { ControlBar } from './components/ControlBar';
 import { StatusIndicator } from './components/StatusIndicator';
 import { SpeechOverlay } from './components/SpeechOverlay';
 import { ConversationPanel, nextMessageId } from './components/ConversationPanel';
+import { captureFrame, hasFrameChanged } from './utils/frameCapture';
 import type {
   ConversationMessage,
   StatusUpdatePayload,
@@ -38,6 +39,29 @@ export default function App() {
   const microphone = useMicrophone({
     onStateChange: (payload) => sendMessage('MICROPHONE_CONTROL', payload),
   });
+
+  // === 视频帧定时发送 ===
+  const prevHashRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!camera.state.enabled) return;
+
+    const timer = setInterval(() => {
+      if (!camera.videoRef.current) return;
+      const captured = captureFrame(camera.videoRef.current, 640);
+      if (!captured) return;
+
+      const changed = hasFrameChanged(captured.thumbnailHash, prevHashRef.current);
+      prevHashRef.current = captured.thumbnailHash;
+
+      sendMessage('FRAME_DATA', {
+        ...captured.fullFrame,
+        changed,
+      });
+    }, 2000); // 每 2 秒截一帧
+
+    return () => clearInterval(timer);
+  }, [camera.state.enabled, sendMessage]);
 
   // === 音频录制 + VAD 检测 ===
   const handleAudioChunk = useCallback((base64Pcm: string) => {
