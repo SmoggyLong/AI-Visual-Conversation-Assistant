@@ -44,7 +44,26 @@ public class ZhipuVisionService implements VisionService {
             if (choices != null && choices.isArray() && choices.size() > 0) {
                 JsonNode message = choices.get(0).get("message");
                 if (message != null) {
-                    String content = message.get("content").asText();
+                    // 智谱 content 可能是字符串，也可能是对象数组
+                    JsonNode contentNode = message.get("content");
+                    String content = null;
+                    if (contentNode != null) {
+                        if (contentNode.isTextual()) {
+                            content = contentNode.asText();
+                        } else if (contentNode.isArray()) {
+                            // content 是数组时取第一个 text 部分
+                            for (JsonNode part : contentNode) {
+                                if ("text".equals(part.get("type").asText(""))) {
+                                    content = part.get("text").asText();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (content == null) {
+                        log.warn("[VISION] content 格式未知 | message={}", message.toString());
+                        return "";
+                    }
                     log.info("[VISION] 分析结果: {}", content);
                     return content.trim();
                 }
