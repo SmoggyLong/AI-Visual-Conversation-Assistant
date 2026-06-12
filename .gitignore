@@ -29,6 +29,9 @@ client/dist/
 *.log
 logs/
 
+# Docs (local only)
+docs/
+
 # Temp
 *.tmp
 *.swp
