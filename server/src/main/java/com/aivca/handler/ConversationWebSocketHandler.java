@@ -6,6 +6,8 @@ import com.aivca.model.session.ConversationSession;
 import com.aivca.service.SessionManager;
 import com.aivca.api.stt.SttService;
 import com.aivca.api.stt.BaiduSttService;
+import com.aivca.api.vision.VisionService;
+import com.aivca.api.vision.OpenAiVisionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +32,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final String baiduApiKey;
     private final String baiduSecretKey;
+    private final String openAiApiKey;
 
     /** 当前活跃的 WebSocket 连接，以 Spring WebSocket sessionId 为键 */
     private final Map<String, WebSocketSession> activeConnections = new ConcurrentHashMap<>();
@@ -37,17 +40,26 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     /** 每个 wsId 对应的 STT 服务实例 */
     private final Map<String, SttService> sttServices = new ConcurrentHashMap<>();
 
+    /** 视觉分析服务（全局单例） */
+    private final VisionService visionService;
+
     public ConversationWebSocketHandler(SessionManager sessionManager, ObjectMapper objectMapper) {
         this.sessionManager = sessionManager;
         this.objectMapper = objectMapper;
 
-        // 直接从 server/.env 读取百度密钥，不走 Spring 配置
         Map<String, String> env = loadDotenv();
         this.baiduApiKey = env.getOrDefault("BAIDU_ASR_API_KEY", "");
         this.baiduSecretKey = env.getOrDefault("BAIDU_ASR_SECRET_KEY", "");
-        log.info("[CONFIG] 百度 ASR 配置 | apiKey={}... | secretKey={}...",
-                baiduApiKey.isEmpty() ? "(未设置)" : baiduApiKey.substring(0, Math.min(6, baiduApiKey.length())),
-                baiduSecretKey.isEmpty() ? "(未设置)" : "****");
+        this.openAiApiKey = env.getOrDefault("OPENAI_API_KEY", "");
+
+        log.info("[CONFIG] 百度 ASR | apiKey={}... | secretKey=****",
+                baiduApiKey.isEmpty() ? "(未设置)" : baiduApiKey.substring(0, Math.min(6, baiduApiKey.length())));
+        log.info("[CONFIG] OpenAI Vision | apiKey={}...",
+                openAiApiKey.isEmpty() ? "(未设置)" : openAiApiKey.substring(0, Math.min(6, openAiApiKey.length())));
+
+        this.visionService = openAiApiKey.isEmpty()
+                ? null
+                : new OpenAiVisionService(openAiApiKey, objectMapper);
     }
 
     /** 读取 .env 文件为 Map */
@@ -214,7 +226,23 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
             log.debug("[FRAME] 收到新视频帧 | sessionId={} | size={}x{} | checksum={}",
                     session.getSessionId(), frame.getWidth(), frame.getHeight(),
                     frame.getImageChecksum().substring(0, Math.min(8, frame.getImageChecksum().length())));
-            // TODO: feat/vision-api → 接入 Vision API 进行画面分析
+
+            // 调用 Vision API 分析画面
+            if (visionService != null && frame.getData() != null) {
+                sendStatus(wsSession, StatusUpdatePayload.State.watching, "正在分析画面...");
+                String description = visionService.describe(frame.getData());
+                if (!description.isEmpty()) {
+                    session.setCachedVisionDescription(description);
+                    sendMessage(wsSession, MessageType.VISION_RESULT,
+                            VisionResultPayload.builder()
+                                    .frameChecksum(frame.getImageChecksum())
+                                    .description(description)
+                                    .timestamp(System.currentTimeMillis())
+                                    .build());
+                    log.info("[VISION] 画面分析完成 | sessionId={}", session.getSessionId());
+                }
+                sendStatus(wsSession, StatusUpdatePayload.State.idle, "待机");
+            }
         }
     }
 
