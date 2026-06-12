@@ -72,7 +72,7 @@ export function hasFrameChanged(
   const previousSum = pixelRgbSum(previousPixels);
   // 差异超过 1.5% → 有变化
   const diff = Math.abs(currentSum - previousSum) / Math.max(1, previousSum);
-  return diff > 0.015;
+  return diff > 0.03;
 }
 
 /**
