@@ -85,18 +85,35 @@ public class BaiduSttService implements SttService {
     }
 
     private String callAsr(String base64Speech, int rawLen) throws IOException, InterruptedException {
-        String body = "format=pcm&rate=16000&channel=1&cuid=aivca"
-                + "&token=" + URLEncoder.encode(accessToken, StandardCharsets.UTF_8)
-                + "&speech=" + base64Speech + "&len=" + rawLen;
+        // Baidu REST API 要求 application/json 格式
+        java.util.Map<String, Object> json = new java.util.LinkedHashMap<>();
+        json.put("format", "pcm");
+        json.put("rate", 16000);
+        json.put("channel", 1);
+        json.put("cuid", "aivca");
+        json.put("token", accessToken);
+        json.put("speech", base64Speech);
+        json.put("len", rawLen);
+        json.put("dev_pid", 1537);    // 中文普通话模型
+
+        String body = objectMapper.writeValueAsString(json);
+        log.debug("[STT] ASR 请求体大小: {}B", body.length());
+
         HttpClient http = HttpClient.newHttpClient();
         HttpResponse<String> resp = http.send(HttpRequest.newBuilder()
                 .uri(URI.create(ASR_URL))
-                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
-        log.debug("[STT] ASR 响应: HTTP {}", resp.statusCode());
+
+        log.debug("[STT] ASR 响应: HTTP {} | {}",
+                resp.statusCode(),
+                resp.body().length() > 300 ? resp.body().substring(0, 300) : resp.body());
+
         JsonNode root = objectMapper.readTree(resp.body());
         if (root.has("err_no") && root.get("err_no").asInt() != 0)
-            throw new IOException("err_no=" + root.get("err_no").asInt() + " err_msg=" + root.get("err_msg").asText("?"));
+            throw new IOException("err_no=" + root.get("err_no").asInt()
+                    + " err_msg=" + root.get("err_msg").asText("?"));
         if (root.has("result") && root.get("result").isArray() && root.get("result").size() > 0)
             return root.get("result").get(0).asText().trim();
         return "";
