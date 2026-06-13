@@ -69,6 +69,9 @@ public class ConversationSession {
     /** 消费线程 */
     private transient Thread consumerThread;
 
+    /** 说话期间累积的原始帧（WS 线程直接写，不走队列） */
+    private final List<String> bufferedFrames = java.util.Collections.synchronizedList(new ArrayList<>());
+
     /** 当前对话轮次计数（从 0 开始，每轮 user+assistant 递增） */
     private int conversationRound;
 
@@ -103,6 +106,19 @@ public class ConversationSession {
      * @param userText      用户消息文本
      * @param assistantText AI 回复文本
      */
+
+    /** WS 线程直接写：说话期间累积帧 */
+    public void addBufferedFrames(java.util.List<String> frames) {
+        bufferedFrames.addAll(frames);
+    }
+
+    /** Consumer 线程取走并清空累积帧 */
+    public java.util.List<String> getAndClearBufferedFrames() {
+        java.util.List<String> copy = new ArrayList<>(bufferedFrames);
+        bufferedFrames.clear();
+        return copy;
+    }
+
     public void addTurn(String userText, String assistantText) {
         history.add(new ConversationTurn(conversationRound++, userText, assistantText, Instant.now()));
         while (history.size() > MAX_HISTORY) {

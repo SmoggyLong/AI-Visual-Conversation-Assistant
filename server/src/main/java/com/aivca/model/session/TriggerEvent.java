@@ -24,7 +24,8 @@ public class TriggerEvent {
 
     public enum Type {
         VISION,
-        SPEECH
+        SPEECH,
+        SPEECH_BATCH    // 语音+累积帧 一体化事件
     }
 
     public TriggerEvent withFrames(boolean speaking, List<String> frameData) {
@@ -35,6 +36,13 @@ public class TriggerEvent {
 
     public TriggerEvent withSpeech(String text) {
         this.speech = text;
+        return this;
+    }
+
+    /** SPEECH_BATCH: 语音+累积帧一起打包 */
+    public TriggerEvent withSpeechAndFrames(String text, List<String> frameData) {
+        this.speech = text;
+        this.frames = frameData;
         return this;
     }
 

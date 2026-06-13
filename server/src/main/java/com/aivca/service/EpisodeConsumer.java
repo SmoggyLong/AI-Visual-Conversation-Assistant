@@ -15,15 +15,12 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Episode 消费者 —— 每 session 一个线程，严格串行。
  *
- * 核心逻辑：
- * - isSpeaking=true  → 帧不分帧调用 Vision，累积到 episode.bufferedFrames
- * - isSpeaking=false → 同步调 Vision → episode.updateVision → shouldClose?
- * - SPEECH           → setSpeech → Vision(累积的帧) → forceClose → respond()
+ * isSpeaking 帧由 WS 线程直写 session，不经过此队列。
+ * 此队列只接收：静默 VISION 帧、SPEECH_BATCH（语音+累积帧打包）。
  */
 @Slf4j
 public class EpisodeConsumer implements Runnable {
@@ -33,8 +30,8 @@ public class EpisodeConsumer implements Runnable {
     private final VisionService visionService;
     private volatile boolean running = true;
 
-    /** 说话期间累积的原始帧 */
-    private final List<String> bufferedFrames = new ArrayList<>();
+    /** 超过 3 秒的静默帧视为过期丢弃 */
+    private static final long MAX_FRAME_AGE_MS = 3000;
 
     public EpisodeConsumer(ConversationSession session, Orchestrator orchestrator,
                            String zhipuApiKey, ObjectMapper objectMapper) {
@@ -47,17 +44,16 @@ public class EpisodeConsumer implements Runnable {
 
     @Override
     public void run() {
-        log.info("[EP] 消费者启动 | sessionId={}", session.getSessionId());
+        log.info("[EP] Consumer 启动 | sessionId={}", session.getSessionId());
         try {
             while (running) {
-                TriggerEvent event = session.getEventQueue().poll(10, TimeUnit.SECONDS);
-                if (event == null) continue;
+                TriggerEvent event = session.getEventQueue().take();  // 阻塞，被 interrupt 时退出
                 processEvent(event);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        log.info("[EP] 消费者停止 | sessionId={}", session.getSessionId());
+        log.info("[EP] Consumer 停止 | sessionId={}", session.getSessionId());
     }
 
     public void stop() {
@@ -69,78 +65,73 @@ public class EpisodeConsumer implements Runnable {
     // ==================== event processing ====================
 
     private void processEvent(TriggerEvent event) {
-        Episode ep = session.getCurrentEpisode();
+        // 过期帧丢弃
+        if (event.getType() == TriggerEvent.Type.VISION) {
+            long age = System.currentTimeMillis() - event.getTimestamp();
+            if (age > MAX_FRAME_AGE_MS) {
+                log.debug("[EP] 丢弃过期帧 | ageMs={}", age);
+                return;
+            }
+        }
 
         switch (event.getType()) {
-            case VISION -> handleVision(event, ep);
-            case SPEECH -> handleSpeech(event, ep);
+            case VISION -> handleVision(event);
+            case SPEECH_BATCH -> handleSpeechBatch(event);
         }
     }
 
-    /** 静默时的画面 → 同步调 Vision → updateEpisode → shouldClose */
-    private void handleVision(TriggerEvent event, Episode ep) {
-        if (event.isSpeaking()) {
-            // 说话期间 → 只累积帧，不调 Vision
-            bufferedFrames.addAll(event.getFrames());
-            log.debug("[EP] 说话期间累积帧 | totalBuffered={}", bufferedFrames.size());
-            return;
-        }
-
-        // 静默时 → 同步调 Vision
+    /** 静默画面 → 同步调 Vision → updateEpisode → shouldClose */
+    private void handleVision(TriggerEvent event) {
         String desc = visionService.describeBatch(event.getFrames());
         if (desc == null || desc.isEmpty()) return;
 
         VisionStructurer vs = VisionStructurer.parse(desc);
         String action = vs.getAction() != null ? vs.getAction() : "";
 
+        Episode ep = session.getCurrentEpisode();
         if (ep == null || ep.isClosed()) {
-            if (!Episode.canStartNewEpisode()) {
-                log.debug("[EP] 冷却中，跳过 vision");
-                return;
-            }
             ep = new Episode();
             session.setCurrentEpisode(ep);
-            log.info("[EP-{}] ═══ EPISODE 开始 ═══ | trigger=vision_change", ep.getId());
+            log.info("[EP-{}] ═══ EPISODE 开始 ═══ | trigger=vision", ep.getId());
         }
 
         ep.updateVision(vs.getDescription(), action);
-        log.info("[EP-{}] VISION | desc={} | action={}",
-                ep.getId(), truncate(vs.getDescription(), 60), truncate(action, 40));
+        log.info("[EP-{}] VISION | desc={} | action={}", ep.getId(),
+                truncate(vs.getDescription(), 60), truncate(action, 40));
 
         session.setCachedVisionDescription(desc);
         checkAndClose(ep);
     }
 
-    /** 语音到达 → 处理累积帧 + 关闭 episode + 回复 */
-    private void handleSpeech(TriggerEvent event, Episode ep) {
+    /** 语音+累积帧 → Vision → setSpeech → forceClose → respond */
+    private void handleSpeechBatch(TriggerEvent event) {
+        Episode ep = session.getCurrentEpisode();
         if (ep == null || ep.isClosed()) {
-            if (!Episode.canStartNewEpisode()) {
-                log.debug("[EP] 冷却中，跳过 speech");
-                return;
-            }
             ep = new Episode();
             session.setCurrentEpisode(ep);
-            log.info("[EP-{}] ═══ EPISODE 开始 ═══ | trigger=speech", ep.getId());
         }
 
         ep.setSpeech(event.getSpeech());
-        log.info("[EP-{}] SPEECH | text={}", ep.getId(), truncate(event.getSpeech(), 40));
+        log.info("[EP-{}] ═══ EPISODE 开始 ═══ | trigger=speech", ep.getId());
+        log.info("[EP-{}] SPEECH_BATCH | text={} | frames={}", ep.getId(),
+                truncate(event.getSpeech(), 40),
+                event.getFrames() != null ? event.getFrames().size() : 0);
 
-        // 处理说话期间累积的帧
-        if (!bufferedFrames.isEmpty()) {
-            log.info("[EP-{}] 处理累积帧 | count={}", ep.getId(), bufferedFrames.size());
-            String desc = visionService.describeBatch(new ArrayList<>(bufferedFrames));
-            bufferedFrames.clear();
+        // 处理累积帧
+        if (event.getFrames() != null && !event.getFrames().isEmpty()) {
+            String desc = visionService.describeBatch(new ArrayList<>(event.getFrames()));
             if (desc != null && !desc.isEmpty()) {
                 VisionStructurer vs = VisionStructurer.parse(desc);
                 ep.updateVision(vs.getDescription(), vs.getAction());
                 session.setCachedVisionDescription(desc);
+                log.info("[EP-{}] VISION 完成 | desc={}", ep.getId(), truncate(vs.getDescription(), 60));
             }
         }
 
         ep.forceClose("speech");
         ep.setClosed(true);
         ep.setCloseTime(java.time.Instant.now());
+        log.info("[EP-{}] ═══ EPISODE 关闭 ═══ | reason=speech", ep.getId());
         respond(ep);
     }
 
@@ -170,8 +161,9 @@ public class EpisodeConsumer implements Runnable {
                 result.getConfidence(),
                 result.getReasoning());
 
-        Episode.markResponseSent();
-        log.info("[EP-{}] ═══ EPISODE 完成 ═══ | 冷却 {}s", ep.getId(), 5);
+        long totalMs = java.time.Duration.between(ep.getStartTime(), java.time.Instant.now()).toMillis();
+        log.info("[EP-{}] ═══ EPISODE 完成 ═══ | totalMs={} | queueSize={}",
+                ep.getId(), totalMs, session.getEventQueue().size());
     }
 
     private static String truncate(String s, int maxLen) {

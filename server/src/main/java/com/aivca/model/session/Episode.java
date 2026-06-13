@@ -36,12 +36,6 @@ public class Episode {
     /** 是否已关闭 */
     private boolean closed;
 
-    /** 回复冷却时长 */
-    private static final Duration RESPONSE_COOLDOWN = Duration.ofSeconds(5);
-
-    /** 上次回复时间（session 级共享） */
-    private static Instant lastResponseTime;
-
     public Episode() {
         this.id = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         this.startTime = Instant.now();
@@ -97,17 +91,6 @@ public class Episode {
         this.closeReason = reason;
         this.closed = true;
         this.closeTime = Instant.now();
-    }
-
-    /** 检查回复冷却是否已过 */
-    public static boolean canStartNewEpisode() {
-        return lastResponseTime == null
-                || Duration.between(lastResponseTime, Instant.now()).compareTo(RESPONSE_COOLDOWN) >= 0;
-    }
-
-    /** 标记回复已完成 */
-    public static void markResponseSent() {
-        lastResponseTime = Instant.now();
     }
 
     // getters

@@ -217,6 +217,11 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
         if (isCamera) {
             session.setCameraEnabled(ctrl.isEnabled());
             session.setCameraDeviceId(ctrl.getDeviceId());
+            if (!ctrl.isEnabled()) {
+                // 摄像头关闭 → 清空视觉事件队列
+                session.getEventQueue().clear();
+                session.getAndClearBufferedFrames();
+            }
         } else {
             session.setMicrophoneEnabled(ctrl.isEnabled());
             session.setMicrophoneDeviceId(ctrl.getDeviceId());
@@ -228,8 +233,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 处理 FRAME_DATA 消息 —— 入队到 EpisodeConsumer。
-     * 不做 Vision 调用（由 Consumer 线程统一处理）。
+     * 处理 FRAME_DATA 消息 —— isSpeaking 帧直写 session，否则入队。
      */
     private void handleFrameData(WebSocketSession wsSession, JsonNode root) {
         ConversationSession session = sessionManager.getByWsId(wsSession.getId());
@@ -248,10 +252,15 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 .toList();
         if (frameData.isEmpty()) return;
 
-        ensureConsumer(session);
-        session.getEventQueue().offer(
-                new TriggerEvent(TriggerEvent.Type.VISION)
-                        .withFrames(frame.isSpeaking(), frameData));
+        if (frame.isSpeaking()) {
+            // 说话期间帧 → 直接写 session，不走队列
+            session.addBufferedFrames(frameData);
+        } else {
+            // 静默期间帧 → 入队给 Consumer
+            ensureConsumer(session);
+            session.getEventQueue().offer(
+                    new TriggerEvent(TriggerEvent.Type.VISION).withFrames(false, frameData));
+        }
     }
 
     /** 确保 session 有对应的 EpisodeConsumer */
@@ -378,13 +387,14 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 stt.finish();
             }
 
-            // STT 完成后 → 将语音事件推入 episode 消费者
+            // STT 完成后 → 语音+累积帧打包为 SPEECH_BATCH
             String lastText = lastUserText(session);
             if (lastText != null && !lastText.isEmpty()) {
                 ensureConsumer(session);
-                TriggerEvent event = new TriggerEvent(TriggerEvent.Type.SPEECH)
-                        .withSpeech(lastText);
-                session.getEventQueue().offer(event);
+                var allFrames = session.getAndClearBufferedFrames();
+                session.getEventQueue().offer(
+                        new TriggerEvent(TriggerEvent.Type.SPEECH_BATCH)
+                                .withSpeechAndFrames(lastText, allFrames));
             }
         }
     }
