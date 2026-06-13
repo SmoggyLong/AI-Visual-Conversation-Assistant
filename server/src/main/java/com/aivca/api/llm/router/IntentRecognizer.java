@@ -18,8 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 public class IntentRecognizer {
 
     private static final String ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-    private static final String MODEL = "glm-4-flash";
-    private static final int MAX_TOKENS = 150;   // glm-4-flash 无 reasoning，150 足够 JSON
+    private static final String MODEL = "glm-4.5-air";
+    private static final int MAX_TOKENS = 300;   // reasoning ~100 + JSON ~50
     private static final double MIN_CONFIDENCE = 0.6;
 
     private final String apiKey;
