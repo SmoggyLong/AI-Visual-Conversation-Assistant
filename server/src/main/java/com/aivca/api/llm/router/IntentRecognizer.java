@@ -98,6 +98,7 @@ public class IntentRecognizer {
                     "model", MODEL,
                     "max_tokens", MAX_TOKENS,
                     "temperature", 0.1,
+                    "response_format", java.util.Map.of("type", "json_object"),
                     "messages", java.util.List.of(java.util.Map.of(
                             "role", "user",
                             "content", java.util.List.of(java.util.Map.of("type", "text", "text", prompt))
