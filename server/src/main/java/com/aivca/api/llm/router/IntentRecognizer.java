@@ -74,13 +74,12 @@ public class IntentRecognizer {
 
     private String buildPrompt(String context) {
         return String.format("""
-                [用户说] %s
+                %s
                 
-                判断意图和最急程度。意图: %s。紧急度: %s。
-                
+                意图: %s。紧急度: %s。
                 只输出JSON: {"intent":"xxx","urgency":"xxx","confidence":0.0-1.0,"reasoning":"xxx"}
                 """,
-                context != null ? context.replace("[用户说] ", "").trim() : "",
+                context != null ? context : "",
                 IntentType.promptOptions(),
                 UrgencyLevel.promptOptions()
         );
