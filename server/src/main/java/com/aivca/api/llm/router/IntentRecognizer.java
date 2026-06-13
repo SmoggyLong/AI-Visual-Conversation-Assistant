@@ -42,10 +42,11 @@ public class IntentRecognizer {
         }
 
         try {
-            String prompt = buildPrompt(context);
-            log.debug("[INTENT] 请求 LLM | contextLen={}", context.length());
+            String textPrompt = buildPrompt(context);
+            String body = buildRequestBody(textPrompt);
+            log.debug("[INTENT] 请求 LLM | bodySize={}", body.length());
 
-            JsonNode root = HttpUtil.postJsonWithAuth(ZHIPU_URL, prompt, apiKey, objectMapper);
+            JsonNode root = HttpUtil.postJsonWithAuth(ZHIPU_URL, body, apiKey, objectMapper);
             log.debug("[INTENT] HTTP 原始响应 | body={}",
                     root.toString().length() > 300 ? root.toString().substring(0, 300) : root.toString());
 
@@ -72,40 +73,31 @@ public class IntentRecognizer {
     // ==================== private ====================
 
     private String buildPrompt(String context) {
-        String prompt = String.format("""
-                分析以下用户输入，同时判断意图类别和紧急程度。
+        return String.format("""
+                [用户说] %s
                 
-                %s
+                判断意图和最急程度。意图: %s。紧急度: %s。
                 
-                意图类别（选一个）：
-                %s
-                
-                紧急程度（选一个）：
-                %s
-                
-                返回 JSON（只输出 JSON，不要其他文字）：
-                {"intent":"%s","urgency":"%s","confidence":0.0-1.0,"reasoning":"一句话判断依据"}
+                只输出JSON: {"intent":"xxx","urgency":"xxx","confidence":0.0-1.0,"reasoning":"xxx"}
                 """,
-                context,
-                IntentType.promptWithLabels(),
-                UrgencyLevel.promptWithLabels(),
+                context != null ? context.replace("[用户说] ", "").trim() : "",
                 IntentType.promptOptions(),
                 UrgencyLevel.promptOptions()
         );
+    }
 
+    private String buildRequestBody(String textPrompt) {
         try {
-            String body = objectMapper.writeValueAsString(java.util.Map.of(
+            return objectMapper.writeValueAsString(java.util.Map.of(
                     "model", MODEL,
                     "max_tokens", MAX_TOKENS,
                     "temperature", 0.1,
                     "response_format", java.util.Map.of("type", "json_object"),
                     "messages", java.util.List.of(java.util.Map.of(
                             "role", "user",
-                            "content", java.util.List.of(java.util.Map.of("type", "text", "text", prompt))
+                            "content", java.util.List.of(java.util.Map.of("type", "text", "text", textPrompt))
                     ))
             ));
-            log.debug("[INTENT] 请求体: {}", body.length() > 300 ? body.substring(0, 300) : body);
-            return body;
         } catch (Exception e) {
             log.error("[INTENT] 构建请求体失败", e);
             return "";
