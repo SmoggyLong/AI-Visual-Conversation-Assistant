@@ -1,10 +1,10 @@
 package com.aivca.service;
 
 import com.aivca.api.llm.model.IntentResult;
-import com.aivca.api.llm.model.AgentContext;
-import com.aivca.api.llm.model.ChatResponse;
-import com.aivca.api.llm.agent.Agent;
-import com.aivca.api.llm.router.AgentRouter;
+import com.aivca.agent.AgentRouter;
+import com.aivca.agent.Agent;
+import com.aivca.agent.model.AgentContext;
+import com.aivca.agent.model.ChatResponse;
 import com.aivca.constant.IntentType;
 import com.aivca.api.vision.VisionService;
 import com.aivca.api.vision.ZhipuVisionService;
@@ -174,6 +174,7 @@ public class EpisodeConsumer implements Runnable {
                 ep.getSpeech(),
                 ep.getVisionDesc(),
                 ep.getAction(),
+                result.getUrgency().toValue(),
                 result.getSecondaryIntents().stream().map(IntentType::toValue).toList()
         );
         ChatResponse chatResp = agent.handle(agentCtx);

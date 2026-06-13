@@ -1,17 +1,15 @@
-package com.aivca.api.llm.agent;
+package com.aivca.agent;
 
+import com.aivca.agent.model.AgentContext;
+import com.aivca.agent.model.ChatResponse;
 import com.aivca.api.llm.ZhipuChatService;
-import com.aivca.api.llm.model.AgentContext;
-import com.aivca.api.llm.model.ChatResponse;
+import com.aivca.constant.UrgencyLevel;
 
-/**
- * 问候 Agent — 友善活泼，简短热情。
- */
 public class GreetingAgent implements Agent {
 
     private static final String SYSTEM_PROMPT = """
             你叫小灵，是一个友善的AI助手。
-            回复要求：
+            回复要求:
             - 热情但简短（2-3句）
             - 可以适当使用 emoji
             - 如果画面中有人在挥手，你也回应"看到你挥手了"
@@ -25,22 +23,20 @@ public class GreetingAgent implements Agent {
     @Override public String name() { return "greeting"; }
     @Override public String intent() { return "greeting"; }
     @Override public String systemPrompt() { return SYSTEM_PROMPT; }
-    @Override public String model() { return "glm-4-flash"; }
     @Override public double temperature() { return 0.7; }
     @Override public int maxTokens() { return 150; }
 
-    @Override
-    public ChatResponse handle(AgentContext context) {
-        String userMsg = buildUserMessage(context);
-        return chatService.chat(model(), systemPrompt(), userMsg, temperature(), maxTokens());
-    }
+    /** 问候始终用最便宜的 flash */
+    @Override public String selectModel(UrgencyLevel urgency) { return "glm-4-flash"; }
 
-    private String buildUserMessage(AgentContext ctx) {
+    @Override
+    public ChatResponse handle(AgentContext ctx) {
         StringBuilder sb = new StringBuilder();
         if (ctx.getSpeech() != null) sb.append("[用户说] ").append(ctx.getSpeech());
         if (ctx.getVisionDesc() != null) sb.append("\n[画面] ").append(ctx.getVisionDesc());
         if (ctx.getVisionAction() != null && !ctx.getVisionAction().isEmpty())
             sb.append("\n[动作] ").append(ctx.getVisionAction());
-        return sb.toString();
+        return chatService.chat(selectModel(UrgencyLevel.fromString(ctx.getUrgency())),
+                systemPrompt(), sb.toString(), temperature(), maxTokens());
     }
 }

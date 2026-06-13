@@ -1,12 +1,10 @@
-package com.aivca.api.llm.agent;
+package com.aivca.agent;
 
+import com.aivca.agent.model.AgentContext;
+import com.aivca.agent.model.ChatResponse;
 import com.aivca.api.llm.ZhipuChatService;
-import com.aivca.api.llm.model.AgentContext;
-import com.aivca.api.llm.model.ChatResponse;
+import com.aivca.constant.UrgencyLevel;
 
-/**
- * 通用兜底 Agent — 自然闲谈。
- */
 public class GeneralAgent implements Agent {
 
     private static final String SYSTEM_PROMPT = """
@@ -25,15 +23,15 @@ public class GeneralAgent implements Agent {
     @Override public String name() { return "general"; }
     @Override public String intent() { return "general"; }
     @Override public String systemPrompt() { return SYSTEM_PROMPT; }
-    @Override public String model() { return "glm-4-flash"; }
     @Override public double temperature() { return 0.5; }
     @Override public int maxTokens() { return 150; }
 
     @Override
-    public ChatResponse handle(AgentContext context) {
+    public ChatResponse handle(AgentContext ctx) {
         StringBuilder sb = new StringBuilder();
-        if (context.getSpeech() != null) sb.append("[用户说] ").append(context.getSpeech());
-        if (context.getVisionDesc() != null) sb.append("\n[画面] ").append(context.getVisionDesc());
-        return chatService.chat(model(), systemPrompt(), sb.toString(), temperature(), maxTokens());
+        if (ctx.getSpeech() != null) sb.append("[用户说] ").append(ctx.getSpeech());
+        if (ctx.getVisionDesc() != null) sb.append("\n[画面] ").append(ctx.getVisionDesc());
+        return chatService.chat(selectModel(UrgencyLevel.fromString(ctx.getUrgency())),
+                systemPrompt(), sb.toString(), temperature(), maxTokens());
     }
 }

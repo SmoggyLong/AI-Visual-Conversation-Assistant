@@ -2,7 +2,7 @@ package com.aivca.handler;
 
 import com.aivca.api.llm.model.IntentResult;
 import com.aivca.api.llm.router.IntentRecognizer;
-import com.aivca.api.llm.router.AgentRouter;
+import com.aivca.agent.AgentRouter;
 import com.aivca.model.session.ConversationSession;
 import com.aivca.util.ContextBuilder;
 import com.aivca.util.SpeechSanitizer;

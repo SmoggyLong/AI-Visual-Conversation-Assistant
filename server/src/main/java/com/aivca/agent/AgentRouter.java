@@ -1,8 +1,7 @@
-package com.aivca.api.llm.router;
+package com.aivca.agent;
 
-import com.aivca.api.llm.ZhipuChatService;
-import com.aivca.api.llm.agent.*;
 import com.aivca.api.llm.model.IntentResult;
+import com.aivca.api.llm.ZhipuChatService;
 import com.aivca.constant.IntentType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -32,29 +31,16 @@ public class AgentRouter {
         this.generalAgent = new GeneralAgent(zp);
     }
 
-    /**
-     * 路由到对应 Agent。
-     */
     public Agent route(IntentResult result) {
-        // 规则1: emergency 最高优先级
-        if (result.containsIntent(IntentType.EMERGENCY)) {
-            return agentMap.get(IntentType.EMERGENCY);
-        }
-
-        // 规则2: 置信度过低 → general 兜底
+        if (result.containsIntent(IntentType.EMERGENCY)) return agentMap.get(IntentType.EMERGENCY);
         if (result.getConfidence() < 0.6) {
-            log.info("[ROUTE] 置信度过低({})，降级为 general", result.getConfidence());
+            log.info("[ROUTE] 置信度过低({})，降级 general", result.getConfidence());
             return generalAgent;
         }
-
-        // 规则3: 按主意图路由
         Agent agent = agentMap.get(result.getIntent());
-        if (agent != null) return agent;
-
-        return generalAgent;
+        return agent != null ? agent : generalAgent;
     }
 
-    /** 用于扩展意图（后续加） */
     public void registerAgent(IntentType intent, Agent agent) {
         agentMap.put(intent, agent);
     }

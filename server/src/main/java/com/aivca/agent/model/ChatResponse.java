@@ -1,17 +1,12 @@
-package com.aivca.api.llm.model;
+package com.aivca.agent.model;
 
 /**
  * Agent 回复。
  */
 public class ChatResponse {
 
-    /** 回复文字 */
     private String text;
-
-    /** 动作：idle / wave / point / nod */
     private String action;
-
-    /** 表情：happy / curious / neutral / surprised */
     private String expression;
 
     public ChatResponse() {}

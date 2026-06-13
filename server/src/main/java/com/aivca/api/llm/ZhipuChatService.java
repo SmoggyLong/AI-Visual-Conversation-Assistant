@@ -1,6 +1,6 @@
 package com.aivca.api.llm;
 
-import com.aivca.api.llm.model.ChatResponse;
+import com.aivca.agent.model.ChatResponse;
 import com.aivca.util.HttpUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
