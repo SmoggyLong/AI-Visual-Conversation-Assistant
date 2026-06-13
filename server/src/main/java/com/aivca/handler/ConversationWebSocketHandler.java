@@ -50,6 +50,9 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     /** 视觉分析服务（全局单例） */
     private final VisionService visionService;
 
+    /** 编排器 — 串联数据清洗 + 意图识别 */
+    private final Orchestrator orchestrator;
+
     public ConversationWebSocketHandler(SessionManager sessionManager, ObjectMapper objectMapper) {
         this.sessionManager = sessionManager;
         this.objectMapper = objectMapper;
@@ -67,6 +70,10 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
         this.visionService = zhipuApiKey.isEmpty()
                 ? null
                 : new ZhipuVisionService(zhipuApiKey, objectMapper);
+
+        this.orchestrator = zhipuApiKey.isEmpty()
+                ? null
+                : new Orchestrator(zhipuApiKey, objectMapper);
     }
 
     /** 读取 .env 文件为 Map */
@@ -374,6 +381,20 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
             if (stt != null) {
                 log.info("[STT] 触发识别 | wsId={}", wsId);
                 stt.finish();
+            }
+
+            // STT 完成后 → 意图识别
+            if (orchestrator != null) {
+                try {
+                    var result = orchestrator.recognizeIntent(session);
+                    log.info("[ORCH] 意图: {} | 紧急度: {} | 置信度: {} | 依据: {}",
+                            result.getIntent().toValue(),
+                            result.getUrgency().toValue(),
+                            result.getConfidence(),
+                            result.getReasoning());
+                } catch (Exception e) {
+                    log.error("[ORCH] 意图识别异常", e);
+                }
             }
         }
     }
