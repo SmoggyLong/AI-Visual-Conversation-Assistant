@@ -46,10 +46,6 @@ export default function App() {
   const BUFFER_MAX = 60;  // 保留最近 12 秒（5fps × 12s，覆盖最长一句话）
   const SEND_COUNT = 5;   // 每次发送最近 1 秒（5 帧）
 
-  // 用 ref 跟踪 isSpeaking，避免闭包过期
-  const isSpeakingRef = useRef(false);
-  isSpeakingRef.current = speechState.isSpeaking;
-
   useEffect(() => {
     if (!camera.state.enabled) return;
     frameBufferRef.current = [];
@@ -120,6 +116,8 @@ export default function App() {
     onSpeechStart: handleSpeechStart,
     onSpeechEnd: handleSpeechEnd,
   });
+  const isSpeakingRef = useRef(false);
+  isSpeakingRef.current = speechState.isSpeaking;
 
   // === 监听后端消息 ===
   onMessage(useCallback((msg: Message<ServerPayload>) => {
