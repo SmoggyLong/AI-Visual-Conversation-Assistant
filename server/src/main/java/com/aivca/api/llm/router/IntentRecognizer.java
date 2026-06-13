@@ -9,18 +9,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 意图识别器。
+ * 意图识别器 — DeepSeek 版。
  *
- * 调用 glm-4.5-air 对用户语音+视觉上下文的组合文本做联合分类，
- * 同时输出意图类别和紧急程度。
+ * 调用 deepseek-chat 对用户语音+视觉上下文的组合文本做联合分类。
  */
 @Slf4j
 public class IntentRecognizer {
 
-    private static final String ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-    private static final String MODEL = "glm-4-flash";
-    private static final int MAX_TOKENS = 80;
+    private static final String DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
+    private static final String MODEL = "deepseek-chat";
+    private static final int MAX_TOKENS = 150;
     private static final double MIN_CONFIDENCE = 0.6;
+
+    private static final String SYSTEM_PROMPT = "你是意图分类器。只输出JSON，不要任何解释或额外文字。";
 
     private final String apiKey;
     private final ObjectMapper objectMapper;
@@ -33,7 +34,7 @@ public class IntentRecognizer {
     /**
      * 识别用户意图和紧急程度。
      *
-     * @param context ContextBuilder.build() 的输出文本（可为 null）
+     * @param context ContextBuilder.build() 的输出文本
      * @return 识别结果；失败时降级为 (GENERAL, NORMAL)
      */
     public IntentResult recognize(String context) {
@@ -42,16 +43,14 @@ public class IntentRecognizer {
         }
 
         try {
-            String textPrompt = buildPrompt(context);
-            String body = buildRequestBody(textPrompt);
-            log.debug("[INTENT] 请求 LLM | bodySize={}", body.length());
+            String body = buildRequestBody(context);
+            log.debug("[INTENT] 请求 DeepSeek | bodySize={}", body.length());
 
-            JsonNode root = HttpUtil.postJsonWithAuth(ZHIPU_URL, body, apiKey, objectMapper);
+            JsonNode root = HttpUtil.postJsonWithAuth(DEEPSEEK_URL, body, apiKey, objectMapper);
             log.debug("[INTENT] HTTP 原始响应 | body={}",
                     root.toString().length() > 300 ? root.toString().substring(0, 300) : root.toString());
 
             JsonNode choices = root.get("choices");
-
             if (choices != null && choices.isArray() && choices.size() > 0) {
                 String content = extractContent(choices.get(0));
                 if (content != null) {
@@ -60,7 +59,7 @@ public class IntentRecognizer {
             }
 
             if (root.has("error")) {
-                log.error("[INTENT] 智谱返回错误: {}", root.get("error").get("message").asText("?"));
+                log.error("[INTENT] DeepSeek 返回错误: {}", root.get("error").get("message").asText("?"));
             }
 
         } catch (Exception e) {
@@ -72,29 +71,28 @@ public class IntentRecognizer {
 
     // ==================== private ====================
 
-    private String buildPrompt(String context) {
-        return String.format("""
+    private String buildRequestBody(String context) {
+        String userPrompt = String.format("""
                 %s
-                
+
                 意图(%s) 紧急度(%s)
-                只输出JSON比如: {"intent":"greeting","urgency":"low","confidence":0.95,"reasoning":"打招呼"}
+                示例: {"intent":"greeting","urgency":"low","confidence":0.95,"reasoning":"打招呼"}
+                现在输出:
                 """,
                 context != null ? context : "",
                 IntentType.promptOptions(),
                 UrgencyLevel.promptOptions()
         );
-    }
 
-    private String buildRequestBody(String textPrompt) {
         try {
             return objectMapper.writeValueAsString(java.util.Map.of(
                     "model", MODEL,
                     "max_tokens", MAX_TOKENS,
                     "temperature", 0.0,
-                    "messages", java.util.List.of(java.util.Map.of(
-                            "role", "user",
-                            "content", java.util.List.of(java.util.Map.of("type", "text", "text", textPrompt))
-                    ))
+                    "messages", java.util.List.of(
+                            java.util.Map.of("role", "system", "content", SYSTEM_PROMPT),
+                            java.util.Map.of("role", "user", "content", userPrompt)
+                    )
             ));
         } catch (Exception e) {
             log.error("[INTENT] 构建请求体失败", e);
@@ -129,7 +127,6 @@ public class IntentRecognizer {
             String reasoning = root.has("reasoning") ? root.get("reasoning").asText("") : "";
             double confidence = root.has("confidence") ? root.get("confidence").asDouble(0.5) : 0.5;
 
-            // 置信度过低 → 降级为 general
             if (confidence < MIN_CONFIDENCE) {
                 log.info("[INTENT] 置信度过低({})，降级为 general", confidence);
                 return new IntentResult(IntentType.GENERAL, UrgencyLevel.NORMAL, reasoning, confidence);

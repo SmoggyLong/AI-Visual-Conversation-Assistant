@@ -20,8 +20,9 @@ public class Orchestrator {
 
     private final IntentRecognizer intentRecognizer;
 
-    public Orchestrator(String zhipuApiKey, com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
-        this.intentRecognizer = new IntentRecognizer(zhipuApiKey, objectMapper);
+    public Orchestrator(String zhipuApiKey, String deepseekApiKey,
+                        com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+        this.intentRecognizer = new IntentRecognizer(deepseekApiKey, objectMapper);
     }
 
     /**

@@ -38,6 +38,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     private final String baiduApiKey;
     private final String baiduSecretKey;
     private final String zhipuApiKey;
+    private final String deepseekApiKey;
 
     /** 当前活跃的 WebSocket 连接，以 Spring WebSocket sessionId 为键 */
     private final Map<String, WebSocketSession> activeConnections = new ConcurrentHashMap<>();
@@ -62,11 +63,14 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
         this.baiduApiKey = env.getOrDefault("BAIDU_ASR_API_KEY", "");
         this.baiduSecretKey = env.getOrDefault("BAIDU_ASR_SECRET_KEY", "");
         this.zhipuApiKey = env.getOrDefault("ZHIPU_API_KEY", "");
+        this.deepseekApiKey = env.getOrDefault("DEEPSEEK_API_KEY", "");
 
         log.info("[CONFIG] 百度 ASR | apiKey={}... | secretKey=****",
                 baiduApiKey.isEmpty() ? "(未设置)" : baiduApiKey.substring(0, Math.min(6, baiduApiKey.length())));
         log.info("[CONFIG] 智谱 Vision | apiKey={}...",
                 zhipuApiKey.isEmpty() ? "(未设置)" : zhipuApiKey.substring(0, Math.min(6, zhipuApiKey.length())));
+        log.info("[CONFIG] DeepSeek Intent | apiKey={}...",
+                deepseekApiKey.isEmpty() ? "(未设置)" : deepseekApiKey.substring(0, Math.min(6, deepseekApiKey.length())));
 
         this.visionService = zhipuApiKey.isEmpty()
                 ? null
@@ -74,7 +78,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
 
         this.orchestrator = zhipuApiKey.isEmpty()
                 ? null
-                : new Orchestrator(zhipuApiKey, objectMapper);
+                : new Orchestrator(zhipuApiKey, deepseekApiKey, objectMapper);
     }
 
     /** 读取 .env 文件为 Map */
