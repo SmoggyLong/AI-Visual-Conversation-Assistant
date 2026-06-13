@@ -18,8 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 public class IntentRecognizer {
 
     private static final String ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-    private static final String MODEL = "glm-4.5-air";
-    private static final int MAX_TOKENS = 300;   // reasoning ~100 + JSON ~50
+    private static final String MODEL = "glm-4-flash";
+    private static final int MAX_TOKENS = 80;
     private static final double MIN_CONFIDENCE = 0.6;
 
     private final String apiKey;
@@ -76,8 +76,8 @@ public class IntentRecognizer {
         return String.format("""
                 %s
                 
-                意图: %s。紧急度: %s。
-                只输出JSON: {"intent":"xxx","urgency":"xxx","confidence":0.0-1.0,"reasoning":"xxx"}
+                意图(%s) 紧急度(%s)
+                只输出JSON比如: {"intent":"greeting","urgency":"low","confidence":0.95,"reasoning":"打招呼"}
                 """,
                 context != null ? context : "",
                 IntentType.promptOptions(),
@@ -90,8 +90,7 @@ public class IntentRecognizer {
             return objectMapper.writeValueAsString(java.util.Map.of(
                     "model", MODEL,
                     "max_tokens", MAX_TOKENS,
-                    "temperature", 0.1,
-                    "response_format", java.util.Map.of("type", "json_object"),
+                    "temperature", 0.0,
                     "messages", java.util.List.of(java.util.Map.of(
                             "role", "user",
                             "content", java.util.List.of(java.util.Map.of("type", "text", "text", textPrompt))
