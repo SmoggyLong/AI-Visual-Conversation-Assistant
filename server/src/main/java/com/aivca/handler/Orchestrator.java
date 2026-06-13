@@ -2,10 +2,12 @@ package com.aivca.handler;
 
 import com.aivca.api.llm.model.IntentResult;
 import com.aivca.api.llm.router.IntentRecognizer;
+import com.aivca.api.llm.router.AgentRouter;
 import com.aivca.model.session.ConversationSession;
 import com.aivca.util.ContextBuilder;
 import com.aivca.util.SpeechSanitizer;
 import com.aivca.util.VisionStructurer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -19,11 +21,16 @@ import lombok.extern.slf4j.Slf4j;
 public class Orchestrator {
 
     private final IntentRecognizer intentRecognizer;
+    private final AgentRouter agentRouter;
 
     public Orchestrator(String zhipuApiKey, String deepseekApiKey,
-                        com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper) {
         this.intentRecognizer = new IntentRecognizer(deepseekApiKey, objectMapper);
+        this.agentRouter = new AgentRouter(deepseekApiKey, zhipuApiKey, objectMapper);
     }
+
+    /** 暴露 AgentRouter 供 EpisodeConsumer 使用 */
+    public AgentRouter getAgentRouter() { return agentRouter; }
 
     /**
      * 执行意图识别管线。

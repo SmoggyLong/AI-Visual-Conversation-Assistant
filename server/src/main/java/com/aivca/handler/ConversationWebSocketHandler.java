@@ -272,7 +272,8 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     private void ensureConsumer(ConversationSession session) {
         String sid = session.getSessionId();
         episodeConsumers.computeIfAbsent(sid, k ->
-                new EpisodeConsumer(session, orchestrator, zhipuApiKey, objectMapper));
+                new EpisodeConsumer(session, orchestrator, zhipuApiKey, objectMapper,
+                        orchestrator.getAgentRouter()));
     }
 
     /** 推送 VISION_RESULT 给前端 */

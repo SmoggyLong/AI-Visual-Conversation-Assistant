@@ -1,6 +1,11 @@
 package com.aivca.service;
 
 import com.aivca.api.llm.model.IntentResult;
+import com.aivca.api.llm.model.AgentContext;
+import com.aivca.api.llm.model.ChatResponse;
+import com.aivca.api.llm.agent.Agent;
+import com.aivca.api.llm.router.AgentRouter;
+import com.aivca.constant.IntentType;
 import com.aivca.api.vision.VisionService;
 import com.aivca.api.vision.ZhipuVisionService;
 import com.aivca.handler.Orchestrator;
@@ -28,16 +33,18 @@ public class EpisodeConsumer implements Runnable {
     private final ConversationSession session;
     private final Orchestrator orchestrator;
     private final VisionService visionService;
+    private final AgentRouter agentRouter;
     private volatile boolean running = true;
 
     /** 超过 3 秒的静默帧视为过期丢弃 */
     private static final long MAX_FRAME_AGE_MS = 3000;
 
     public EpisodeConsumer(ConversationSession session, Orchestrator orchestrator,
-                           String zhipuApiKey, ObjectMapper objectMapper) {
+                           String zhipuApiKey, ObjectMapper objectMapper, AgentRouter agentRouter) {
         this.session = session;
         this.orchestrator = orchestrator;
         this.visionService = new ZhipuVisionService(zhipuApiKey, objectMapper);
+        this.agentRouter = agentRouter;
         this.session.setConsumerThread(new Thread(this, "de-" + session.getSessionId()));
         this.session.getConsumerThread().start();
     }
@@ -160,6 +167,20 @@ public class EpisodeConsumer implements Runnable {
                 result.getUrgency().toValue(),
                 result.getConfidence(),
                 result.getReasoning());
+
+        // Agent 路由 → LLM 回复
+        Agent agent = agentRouter.route(result);
+        AgentContext agentCtx = new AgentContext(
+                ep.getSpeech(),
+                ep.getVisionDesc(),
+                ep.getAction(),
+                result.getSecondaryIntents().stream().map(IntentType::toValue).toList()
+        );
+        ChatResponse chatResp = agent.handle(agentCtx);
+        log.info("[EP-{}] AGENT | agent={} | text={} | action={} | expression={}",
+                ep.getId(), agent.name(),
+                chatResp.getText().length() > 50 ? chatResp.getText().substring(0, 50) : chatResp.getText(),
+                chatResp.getAction(), chatResp.getExpression());
 
         long totalMs = java.time.Duration.between(ep.getStartTime(), java.time.Instant.now()).toMillis();
         log.info("[EP-{}] ═══ EPISODE 完成 ═══ | totalMs={} | queueSize={}",

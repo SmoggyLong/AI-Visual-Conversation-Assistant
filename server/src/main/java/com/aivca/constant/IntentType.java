@@ -15,6 +15,7 @@ public enum IntentType {
     VISION("vision",           "询问或展示画面内容（衣着、物体、场景）"),
     TECHNICAL("technical",     "编程、技术、知识问答"),
     EMERGENCY("emergency",     "求救、受伤、危险、恐慌"),
+    GAME("game",               "玩游戏（成语接龙、猜谜等）"),
     GENERAL("general",         "其他闲谈");
 
     private final String value;
