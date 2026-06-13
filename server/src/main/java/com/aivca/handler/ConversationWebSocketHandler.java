@@ -47,6 +47,12 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     /** Vision 调用冷却间隔（毫秒） */
     private static final long VISION_COOLDOWN_MS = 3000;
 
+    /** 编排器调用冷却记录：sessionId → 上次调用时间戳（统一语音+视觉触发） */
+    private final Map<String, Long> orchestratorCooldowns = new ConcurrentHashMap<>();
+
+    /** 编排器冷却间隔（毫秒） */
+    private static final long ORCHESTRATOR_COOLDOWN_MS = 3000;
+
     /** 视觉分析服务（全局单例） */
     private final VisionService visionService;
 
@@ -284,6 +290,28 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
             log.info("[VISION] 画面分析完成 | sessionId={}", sessionId);
         }
         sendStatus(wsSession, StatusUpdatePayload.State.idle, "待机");
+
+        // Vision 完成后 → 意图识别（画面变化也可能触发）
+        triggerOrchestrator(session);
+    }
+
+    /** 统一触发意图识别（带防抖），语音+视觉共用 */
+    private void triggerOrchestrator(ConversationSession session) {
+        if (orchestrator == null) return;
+        String sid = session.getSessionId();
+        long now = System.currentTimeMillis();
+        Long lastCall = orchestratorCooldowns.get(sid);
+        if (lastCall != null && now - lastCall < ORCHESTRATOR_COOLDOWN_MS) return;
+        orchestratorCooldowns.put(sid, now);
+
+        try {
+            var result = orchestrator.recognizeIntent(session);
+            log.info("[ORCH] 意图: {} | 紧急度: {} | 置信度: {} | 依据: {}",
+                    result.getIntent().toValue(), result.getUrgency().toValue(),
+                    result.getConfidence(), result.getReasoning());
+        } catch (Exception e) {
+            log.error("[ORCH] 意图识别异常", e);
+        }
     }
 
     /**
@@ -383,19 +411,8 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 stt.finish();
             }
 
-            // STT 完成后 → 意图识别
-            if (orchestrator != null) {
-                try {
-                    var result = orchestrator.recognizeIntent(session);
-                    log.info("[ORCH] 意图: {} | 紧急度: {} | 置信度: {} | 依据: {}",
-                            result.getIntent().toValue(),
-                            result.getUrgency().toValue(),
-                            result.getConfidence(),
-                            result.getReasoning());
-                } catch (Exception e) {
-                    log.error("[ORCH] 意图识别异常", e);
-                }
-            }
+            // STT 完成后 → 意图识别（语音触发）
+            triggerOrchestrator(session);
         }
     }
 
