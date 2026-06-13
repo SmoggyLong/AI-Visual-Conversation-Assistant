@@ -97,7 +97,7 @@ public class IntentRecognizer {
                     "temperature", 0.1,
                     "messages", java.util.List.of(java.util.Map.of(
                             "role", "user",
-                            "content", prompt    // glm-4.5-air 用纯字符串
+                            "content", java.util.List.of(java.util.Map.of("type", "text", "text", prompt))
                     ))
             ));
             log.debug("[INTENT] 请求体: {}", body.length() > 300 ? body.substring(0, 300) : body);
