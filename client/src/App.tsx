@@ -43,8 +43,12 @@ export default function App() {
   // === 视频帧定时发送（5fps 连续帧 + 环形缓冲）===
   const prevPixelsRef = useRef<ImageData | null>(null);
   const frameBufferRef = useRef<{ data: string; checksum: string; timestamp: number }[]>([]);
-  const BUFFER_MAX = 10;   // 保留最近 2 秒（5fps × 2s）
-  const SEND_COUNT = 5;    // 每次发送最近 1 秒（5 帧）
+  const BUFFER_MAX = 60;  // 保留最近 12 秒（5fps × 12s，覆盖最长一句话）
+  const SEND_COUNT = 5;   // 每次发送最近 1 秒（5 帧）
+
+  // 用 ref 跟踪 isSpeaking，避免闭包过期
+  const isSpeakingRef = useRef(false);
+  isSpeakingRef.current = speechState.isSpeaking;
 
   useEffect(() => {
     if (!camera.state.enabled) return;
@@ -63,13 +67,15 @@ export default function App() {
       if (buf.length > BUFFER_MAX) frameBufferRef.current = buf.slice(-BUFFER_MAX);
 
       // 帧差检测（说话期间跳过容差，全帧发送）
-      const speaking = speechState.isSpeaking;
+      const speaking = isSpeakingRef.current;
       const changed = hasFrameChanged(captured.thumbPixels, prevPixelsRef.current);
       prevPixelsRef.current = captured.thumbPixels;
       if (!speaking && !changed) return;
 
-      // 取最近 SEND_COUNT 帧，带时间偏移
-      const batch = frameBufferRef.current.slice(-SEND_COUNT);
+      // 说话期间发全部缓冲帧，静默时发最近 N 帧
+      const batch = speaking
+        ? frameBufferRef.current.slice()    // 全量
+        : frameBufferRef.current.slice(-SEND_COUNT);  // 最近 5 帧
       sendMessage('FRAME_DATA', {
         format: 'jpeg',
         changed: speaking || changed,

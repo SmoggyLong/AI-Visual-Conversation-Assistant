@@ -46,6 +46,9 @@ public class IntentRecognizer {
             log.debug("[INTENT] 请求 LLM | contextLen={}", context.length());
 
             JsonNode root = HttpUtil.postJsonWithAuth(ZHIPU_URL, prompt, apiKey, objectMapper);
+            log.debug("[INTENT] HTTP 原始响应 | body={}",
+                    root.toString().length() > 300 ? root.toString().substring(0, 300) : root.toString());
+
             JsonNode choices = root.get("choices");
 
             if (choices != null && choices.isArray() && choices.size() > 0) {

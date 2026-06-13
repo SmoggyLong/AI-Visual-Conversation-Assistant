@@ -3,6 +3,7 @@ package com.aivca.handler;
 import com.aivca.model.enums.MessageType;
 import com.aivca.model.message.*;
 import com.aivca.model.session.ConversationSession;
+import com.aivca.model.session.Episode;
 import com.aivca.model.session.TriggerEvent;
 import com.aivca.service.SessionManager;
 import com.aivca.service.EpisodeConsumer;
@@ -380,7 +381,16 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 isStart ? "开始说话" : "停止说话", session.getSessionId());
 
         if (!isStart) {
-            // 说话结束 → 触发 STT FINISH
+            // 说话结束 → 语音主导的 Episode，清空旧 VISION 事件
+            session.getEventQueue().clear();
+            Episode oldEp = session.getCurrentEpisode();
+            if (oldEp != null && !oldEp.isClosed()) {
+                oldEp.forceClose("speech_override");
+                oldEp.setClosed(true);
+            }
+            session.setCurrentEpisode(null);
+
+            // 触发 STT FINISH
             SttService stt = sttServices.get(wsId);
             if (stt != null) {
                 log.info("[STT] 触发识别 | wsId={}", wsId);
