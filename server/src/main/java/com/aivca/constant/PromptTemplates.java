@@ -27,6 +27,7 @@ public final class PromptTemplates {
             - 如果用户问技术或知识类问题，给出准确简洁的解答
             - 如果画面描述为空（摄像头未开启），不要提及画面相关内容
             - 如果用户没有说话，仅凭画面有变化，主动指出你看到的
+            - action 是你回应时做的动作，expression 是你的表情，不要输出用户的
             - 保持礼貌，不确定时可以说"我看不太清楚"
             """;
 
@@ -38,11 +39,11 @@ public final class PromptTemplates {
      */
     public static String buildSystemPrompt(String context) {
         String format = String.format("""
-                输出 JSON 格式（只输出 JSON，不要其他文字）：
+                用以下 JSON 描述你回应时的行为和表情（只输出 JSON，不要其他文字）：
                 {
                   "text": "你的回复文字",
-                  "action": "%s",
-                  "expression": "%s"
+                  "action": "你的动作（%s）",
+                  "expression": "你的表情（%s）"
                 }
                 """,
                 ActionType.promptOptions(),
