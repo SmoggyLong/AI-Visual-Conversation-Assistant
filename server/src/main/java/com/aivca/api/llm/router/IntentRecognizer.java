@@ -19,7 +19,7 @@ public class IntentRecognizer {
 
     private static final String ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
     private static final String MODEL = "glm-4.5-air";
-    private static final int MAX_TOKENS = 120;
+    private static final int MAX_TOKENS = 300;   // 覆盖 reasoning_content ~70 + JSON输出
     private static final double MIN_CONFIDENCE = 0.6;
 
     private final String apiKey;
