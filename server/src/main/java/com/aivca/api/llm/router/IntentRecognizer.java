@@ -37,7 +37,7 @@ public class IntentRecognizer {
      */
     public IntentResult recognize(String context) {
         if (context == null || context.isBlank()) {
-            return new IntentResult(IntentType.GENERAL, UrgencyLevel.LOW, "上下文为空");
+            return new IntentResult(IntentType.GENERAL, UrgencyLevel.LOW, "上下文为空", 0.0);
         }
 
         try {
@@ -62,7 +62,7 @@ public class IntentRecognizer {
             log.error("[INTENT] 识别失败", e);
         }
 
-        return new IntentResult(IntentType.GENERAL, UrgencyLevel.NORMAL, "识别失败，降级");
+        return new IntentResult(IntentType.GENERAL, UrgencyLevel.NORMAL, "识别失败，降级", 0.0);
     }
 
     // ==================== private ====================
@@ -80,7 +80,7 @@ public class IntentRecognizer {
                 %s
                 
                 返回 JSON（只输出 JSON，不要其他文字）：
-                {"intent":"%s","urgency":"%s","reasoning":"一句话判断依据"}
+                {"intent":"%s","urgency":"%s","confidence":0.0-1.0,"reasoning":"一句话判断依据"}
                 """,
                 context,
                 IntentType.promptWithLabels(),
@@ -132,10 +132,11 @@ public class IntentRecognizer {
             IntentType intent = IntentType.fromString(root.get("intent").asText(""));
             UrgencyLevel urgency = UrgencyLevel.fromString(root.get("urgency").asText(""));
             String reasoning = root.has("reasoning") ? root.get("reasoning").asText("") : "";
-            return new IntentResult(intent, urgency, reasoning);
+            double confidence = root.has("confidence") ? root.get("confidence").asDouble(0.5) : 0.5;
+            return new IntentResult(intent, urgency, reasoning, confidence);
         } catch (Exception e) {
             log.warn("[INTENT] JSON 解析失败: {}", content);
-            return new IntentResult(IntentType.GENERAL, UrgencyLevel.NORMAL, "JSON解析失败");
+            return new IntentResult(IntentType.GENERAL, UrgencyLevel.NORMAL, "JSON解析失败", 0.0);
         }
     }
 }

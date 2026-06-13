@@ -17,12 +17,16 @@ public class IntentResult {
     /** 判断依据（一句话说明为什么是这个意图） */
     private String reasoning;
 
+    /** 置信度（0.0 ~ 1.0） */
+    private double confidence;
+
     public IntentResult() {}
 
-    public IntentResult(IntentType intent, UrgencyLevel urgency, String reasoning) {
+    public IntentResult(IntentType intent, UrgencyLevel urgency, String reasoning, double confidence) {
         this.intent = intent;
         this.urgency = urgency;
         this.reasoning = reasoning;
+        this.confidence = confidence;
     }
 
     public IntentType getIntent() { return intent; }
@@ -33,4 +37,7 @@ public class IntentResult {
 
     public String getReasoning() { return reasoning; }
     public void setReasoning(String reasoning) { this.reasoning = reasoning; }
+
+    public double getConfidence() { return confidence; }
+    public void setConfidence(double confidence) { this.confidence = confidence; }
 }
