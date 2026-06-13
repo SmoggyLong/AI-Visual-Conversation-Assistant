@@ -228,8 +228,8 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 处理 FRAME_DATA 消息 —— 接收视频帧（仅画面变化时才发到此处）。
-     * 后续接入 Vision API 进行画面分析。
+     * 处理 FRAME_DATA 消息 —— 入队到 EpisodeConsumer。
+     * 不做 Vision 调用（由 Consumer 线程统一处理）。
      */
     private void handleFrameData(WebSocketSession wsSession, JsonNode root) {
         ConversationSession session = sessionManager.getByWsId(wsSession.getId());
@@ -239,50 +239,26 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 root.get("payload"), FrameDataPayload.class);
         if (frame == null) return;
 
-        String sessionId = session.getSessionId();
         List<FrameDataPayload.FrameItem> batch = frame.getFrames();
-        boolean isBatch = batch != null && !batch.isEmpty();
+        if (batch == null || batch.isEmpty()) return;
 
-        // ensure consumer
+        List<String> frameData = batch.stream()
+                .filter(f -> f.getData() != null)
+                .map(FrameDataPayload.FrameItem::getData)
+                .toList();
+        if (frameData.isEmpty()) return;
+
         ensureConsumer(session);
-
-        // 异步执行 Vision 调用
-        java.util.concurrent.CompletableFuture.runAsync(() -> {
-            String description;
-            if (isBatch) {
-                List<String> frames = batch.stream()
-                        .filter(f -> f.getData() != null)
-                        .map(FrameDataPayload.FrameItem::getData)
-                        .toList();
-                description = visionService.describeBatch(frames);
-                log.info("[VISION] 批量分析完成 | sessionId={} | frames={}", sessionId, frames.size());
-            } else {
-                description = visionService.describe(frame.getData());
-            }
-
-            if (description != null && !description.isEmpty()) {
-                VisionStructurer vs = VisionStructurer.parse(description);
-                session.setCachedVisionDescription(description);
-
-                // 入队 episode consumer
-                TriggerEvent event = new TriggerEvent(TriggerEvent.Type.VISION)
-                        .withVision(vs.getDescription(), vs.getAction());
-                session.getEventQueue().offer(event);
-
-                sendVISION_RESULT(wsSession, description);
-                log.info("[VISION] 画面分析完成 | sessionId={}", sessionId);
-            }
-        });
-
-        sendStatus(wsSession, StatusUpdatePayload.State.watching,
-                isBatch ? "正在分析连续画面..." : "正在分析画面...");
-
+        session.getEventQueue().offer(
+                new TriggerEvent(TriggerEvent.Type.VISION)
+                        .withFrames(frame.isSpeaking(), frameData));
     }
 
     /** 确保 session 有对应的 EpisodeConsumer */
     private void ensureConsumer(ConversationSession session) {
         String sid = session.getSessionId();
-        episodeConsumers.computeIfAbsent(sid, k -> new EpisodeConsumer(session, orchestrator));
+        episodeConsumers.computeIfAbsent(sid, k ->
+                new EpisodeConsumer(session, orchestrator, zhipuApiKey, objectMapper));
     }
 
     /** 推送 VISION_RESULT 给前端 */

@@ -1,19 +1,18 @@
 package com.aivca.model.session;
 
+import java.util.List;
+
 /**
  * 触发事件 —— 放入 EpisodeConsumer 队列的事件载体。
  */
 public class TriggerEvent {
 
-    /** 事件类型 */
     private final Type type;
-
-    /** 事件时间戳 */
     private final long timestamp;
 
     // VISION 类型字段
-    private String visionDesc;
-    private String action;
+    private boolean isSpeaking;
+    private List<String> frames;
 
     // SPEECH 类型字段
     private String speech;
@@ -24,14 +23,13 @@ public class TriggerEvent {
     }
 
     public enum Type {
-        VISION,        // 画面分析完成
-        SPEECH          // 语音识别完成
+        VISION,
+        SPEECH
     }
 
-    // fluent setters
-    public TriggerEvent withVision(String desc, String act) {
-        this.visionDesc = desc;
-        this.action = act;
+    public TriggerEvent withFrames(boolean speaking, List<String> frameData) {
+        this.isSpeaking = speaking;
+        this.frames = frameData;
         return this;
     }
 
@@ -40,10 +38,9 @@ public class TriggerEvent {
         return this;
     }
 
-    // getters
     public Type getType() { return type; }
     public long getTimestamp() { return timestamp; }
-    public String getVisionDesc() { return visionDesc; }
-    public String getAction() { return action; }
+    public boolean isSpeaking() { return isSpeaking; }
+    public List<String> getFrames() { return frames; }
     public String getSpeech() { return speech; }
 }

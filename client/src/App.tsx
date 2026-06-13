@@ -62,22 +62,24 @@ export default function App() {
       buf.push({ data: captured.fullFrame.data!, checksum: captured.fullFrame.imageChecksum!, timestamp: now });
       if (buf.length > BUFFER_MAX) frameBufferRef.current = buf.slice(-BUFFER_MAX);
 
-      // 帧差检测
+      // 帧差检测（说话期间跳过容差，全帧发送）
+      const speaking = speechState.isSpeaking;
       const changed = hasFrameChanged(captured.thumbPixels, prevPixelsRef.current);
       prevPixelsRef.current = captured.thumbPixels;
-      if (!changed) return;
+      if (!speaking && !changed) return;
 
       // 取最近 SEND_COUNT 帧，带时间偏移
       const batch = frameBufferRef.current.slice(-SEND_COUNT);
       sendMessage('FRAME_DATA', {
         format: 'jpeg',
-        changed: true,
+        changed: speaking || changed,
+        isSpeaking: speaking,
         imageChecksum: captured.fullFrame.imageChecksum,
         frames: batch.map((f, i) => ({
           data: f.data,
           format: 'jpeg',
           checksum: f.checksum,
-          offsetMs: -(batch.length - 1 - i) * 200,  // 相对当前帧的时间偏移
+          offsetMs: -(batch.length - 1 - i) * 200,
         })),
       });
     }, 200); // 200ms = 5fps
@@ -105,7 +107,7 @@ export default function App() {
     sendMessage('SPEECH_END', { timestamp: Date.now() });
   }, [sendMessage]);
 
-  useAudioRecorder({
+  const speechState = useAudioRecorder({
     enabled: microphone.state.enabled,
     stream: microphone.state.stream,
     onAudioChunk: handleAudioChunk,

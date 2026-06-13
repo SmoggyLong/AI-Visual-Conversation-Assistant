@@ -61,15 +61,33 @@ public class Episode {
     /** 检查是否应该关闭 episode */
     public boolean shouldClose() {
         if (closed) return false;
+
         // 用户说话了 → 关闭
         if (speech != null && !speech.isEmpty()) {
             closeReason = "speech";
             return true;
         }
-        // 动作状态变化（从有动作变为无动作）→ 关闭
-        if (action != null && action.contains("保持") || (action != null && action.contains("无明显"))) {
-            closeReason = "action_end";
+
+        // 明确动作词 → 关闭并回复
+        if (action != null && isSignificantAction(action)) {
+            closeReason = "action";
             return true;
+        }
+
+        // 10 秒超时 → 关闭
+        if (Duration.between(startTime, Instant.now()).getSeconds() > 10) {
+            closeReason = "timeout";
+            return true;
+        }
+
+        return false;
+    }
+
+    /** 判断 action 是否包含显著动作词 */
+    private boolean isSignificantAction(String act) {
+        for (String kw : new String[]{"挥手","点头","站起","坐下","微笑","离开","出现","走进","走过",
+                "抬起","放下","展示","比划","遮挡","靠近","远离"}) {
+            if (act.contains(kw)) return true;
         }
         return false;
     }

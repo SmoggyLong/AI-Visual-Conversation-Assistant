@@ -43,6 +43,9 @@ public class FrameDataPayload {
 
     // ===== 多帧批次字段 =====
 
+    /** 是否在说话期间截取（true=语音绑定帧，不调 Vision 单独分析） */
+    private boolean isSpeaking;
+
     /** 连续帧列表（5fps 采集，发送最近 1 秒的帧） */
     private List<FrameItem> frames;
 

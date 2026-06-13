@@ -63,10 +63,10 @@ export interface FrameDataPayload {
   format: 'jpeg';
   width?: number;
   height?: number;
-  data?: string;           // base64（单帧模式）
-  changed: boolean;         // 帧差检测：画面是否变化
-  imageChecksum?: string;   // 图片校验和，用于缓存去重
-  /** 连续帧批次（5fps × 最近1秒 = 5帧） */
+  data?: string;
+  changed: boolean;
+  isSpeaking?: boolean;     // 是否在说话期间截取
+  imageChecksum?: string;
   frames?: FrameItem[];
 }
 

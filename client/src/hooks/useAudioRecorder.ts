@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 
 interface UseAudioRecorderOptions {
   /** 是否启用录音 */
@@ -52,6 +52,9 @@ export function useAudioRecorder(options: UseAudioRecorderOptions) {
   const silenceStartRef = useRef<number | null>(null);
   const chunkTimerRef = useRef<ReturnType<typeof setInterval>>();
 
+  /** 当前是否在说话（暴露给调用方） */
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
   useEffect(() => {
     if (!enabled || !stream) {
       cleanup();
@@ -92,6 +95,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions) {
         // 语音检测
         if (!speakingRef.current) {
           speakingRef.current = true;
+          setIsSpeaking(true);
           silenceStartRef.current = null;
           onSpeechStart();
         }
@@ -103,6 +107,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions) {
           silenceStartRef.current = now;
         } else if (now - silenceStartRef.current > silenceDuration) {
           speakingRef.current = false;
+          setIsSpeaking(false);
           silenceStartRef.current = null;
           onSpeechEnd();
         }
@@ -148,6 +153,8 @@ export function useAudioRecorder(options: UseAudioRecorderOptions) {
 
     return cleanup;
   }, [enabled, stream, sampleRate, chunkDuration, silenceThreshold, silenceDuration, onAudioChunk, onSpeechStart, onSpeechEnd]);
+
+  return { isSpeaking };
 
   function cleanup() {
     if (chunkTimerRef.current) { clearInterval(chunkTimerRef.current); chunkTimerRef.current = undefined; }
