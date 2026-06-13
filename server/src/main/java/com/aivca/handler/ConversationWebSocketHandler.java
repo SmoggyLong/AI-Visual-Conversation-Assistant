@@ -3,11 +3,14 @@ package com.aivca.handler;
 import com.aivca.model.enums.MessageType;
 import com.aivca.model.message.*;
 import com.aivca.model.session.ConversationSession;
+import com.aivca.model.session.TriggerEvent;
 import com.aivca.service.SessionManager;
+import com.aivca.service.EpisodeConsumer;
 import com.aivca.api.stt.SttService;
 import com.aivca.api.stt.BaiduSttService;
 import com.aivca.api.vision.VisionService;
 import com.aivca.api.vision.ZhipuVisionService;
+import com.aivca.util.VisionStructurer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -41,17 +44,8 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     /** 每个 wsId 对应的 STT 服务实例 */
     private final Map<String, SttService> sttServices = new ConcurrentHashMap<>();
 
-    /** Vision 调用冷却记录：sessionId → 上次调用时间戳 */
-    private final Map<String, Long> visionCooldowns = new ConcurrentHashMap<>();
-
-    /** Vision 调用冷却间隔（毫秒） */
-    private static final long VISION_COOLDOWN_MS = 3000;
-
-    /** 编排器调用冷却记录：sessionId → 上次调用时间戳（统一语音+视觉触发） */
-    private final Map<String, Long> orchestratorCooldowns = new ConcurrentHashMap<>();
-
-    /** 编排器冷却间隔（毫秒） */
-    private static final long ORCHESTRATOR_COOLDOWN_MS = 3000;
+    /** 每个 sessionId 对应的 EpisodeConsumer（串行队列消费） */
+    private final Map<String, EpisodeConsumer> episodeConsumers = new ConcurrentHashMap<>();
 
     /** 视觉分析服务（全局单例） */
     private final VisionService visionService;
@@ -156,6 +150,11 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionClosed(WebSocketSession wsSession, CloseStatus status) {
         String wsId = wsSession.getId();
+        ConversationSession session = sessionManager.getByWsId(wsId);
+        if (session != null) {
+            EpisodeConsumer consumer = episodeConsumers.remove(session.getSessionId());
+            if (consumer != null) consumer.stop();
+        }
         closeSttSession(wsId);
         activeConnections.remove(wsId);
         sessionManager.remove(wsId);
@@ -241,77 +240,69 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
         if (frame == null) return;
 
         String sessionId = session.getSessionId();
-        String checksum = frame.getImageChecksum();
         List<FrameDataPayload.FrameItem> batch = frame.getFrames();
-
-        // 批次模式（连续帧分析）或单帧模式
         boolean isBatch = batch != null && !batch.isEmpty();
-        if (!isBatch && checksum == null) return;
 
-        long now = System.currentTimeMillis();
-        Long lastCall = visionCooldowns.get(sessionId);
+        // ensure consumer
+        ensureConsumer(session);
 
-        if (lastCall != null && now - lastCall < VISION_COOLDOWN_MS) {
-            log.debug("[VISION] 冷却中，跳过 | sessionId={} | cooldownLeft={}ms",
-                    sessionId, VISION_COOLDOWN_MS - (now - lastCall));
-            return;
-        }
+        // 异步执行 Vision 调用
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            String description;
+            if (isBatch) {
+                List<String> frames = batch.stream()
+                        .filter(f -> f.getData() != null)
+                        .map(FrameDataPayload.FrameItem::getData)
+                        .toList();
+                description = visionService.describeBatch(frames);
+                log.info("[VISION] 批量分析完成 | sessionId={} | frames={}", sessionId, frames.size());
+            } else {
+                description = visionService.describe(frame.getData());
+            }
 
-        if (!isBatch) {
-            // 单帧模式（向后兼容）— checksum 去重
-            if (checksum.equals(session.getCachedImageChecksum())) return;
-            session.setCachedImageChecksum(checksum);
-        }
+            if (description != null && !description.isEmpty()) {
+                VisionStructurer vs = VisionStructurer.parse(description);
+                session.setCachedVisionDescription(description);
 
-        visionCooldowns.put(sessionId, now);
+                // 入队 episode consumer
+                TriggerEvent event = new TriggerEvent(TriggerEvent.Type.VISION)
+                        .withVision(vs.getDescription(), vs.getAction());
+                session.getEventQueue().offer(event);
+
+                sendVISION_RESULT(wsSession, description);
+                log.info("[VISION] 画面分析完成 | sessionId={}", sessionId);
+            }
+        });
+
         sendStatus(wsSession, StatusUpdatePayload.State.watching,
                 isBatch ? "正在分析连续画面..." : "正在分析画面...");
 
-        String description;
-        if (isBatch) {
-            List<String> frames = batch.stream()
-                    .filter(f -> f.getData() != null)
-                    .map(FrameDataPayload.FrameItem::getData)
-                    .toList();
-            description = visionService.describeBatch(frames);
-            log.info("[VISION] 批量分析完成 | sessionId={} | frames={}", sessionId, frames.size());
-        } else {
-            description = visionService.describe(frame.getData());
-        }
-
-        if (!description.isEmpty()) {
-            session.setCachedVisionDescription(description);
-            sendMessage(wsSession, MessageType.VISION_RESULT,
-                    VisionResultPayload.builder()
-                            .frameChecksum(checksum)
-                            .description(description)
-                            .timestamp(now)
-                            .build());
-            log.info("[VISION] 画面分析完成 | sessionId={}", sessionId);
-        }
-        sendStatus(wsSession, StatusUpdatePayload.State.idle, "待机");
-
-        // Vision 完成后 → 意图识别（画面变化也可能触发）
-        triggerOrchestrator(session);
     }
 
-    /** 统一触发意图识别（带防抖），语音+视觉共用 */
-    private void triggerOrchestrator(ConversationSession session) {
-        if (orchestrator == null) return;
+    /** 确保 session 有对应的 EpisodeConsumer */
+    private void ensureConsumer(ConversationSession session) {
         String sid = session.getSessionId();
-        long now = System.currentTimeMillis();
-        Long lastCall = orchestratorCooldowns.get(sid);
-        if (lastCall != null && now - lastCall < ORCHESTRATOR_COOLDOWN_MS) return;
-        orchestratorCooldowns.put(sid, now);
+        episodeConsumers.computeIfAbsent(sid, k -> new EpisodeConsumer(session, orchestrator));
+    }
 
+    /** 推送 VISION_RESULT 给前端 */
+    private void sendVISION_RESULT(WebSocketSession ws, String description) {
         try {
-            var result = orchestrator.recognizeIntent(session);
-            log.info("[ORCH] 意图: {} | 紧急度: {} | 置信度: {} | 依据: {}",
-                    result.getIntent().toValue(), result.getUrgency().toValue(),
-                    result.getConfidence(), result.getReasoning());
+            sendMessage(ws, MessageType.VISION_RESULT,
+                    VisionResultPayload.builder()
+                            .description(description)
+                            .timestamp(System.currentTimeMillis())
+                            .build());
         } catch (Exception e) {
-            log.error("[ORCH] 意图识别异常", e);
+            log.warn("[VISION] 推送 VISION_RESULT 失败", e);
         }
+    }
+
+    /** 取 session 最新用户消息 */
+    private static String lastUserText(ConversationSession session) {
+        var history = session.getHistory();
+        if (history.isEmpty()) return null;
+        return history.get(history.size() - 1).getUserText();
     }
 
     /**
@@ -411,8 +402,14 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 stt.finish();
             }
 
-            // STT 完成后 → 意图识别（语音触发）
-            triggerOrchestrator(session);
+            // STT 完成后 → 将语音事件推入 episode 消费者
+            String lastText = lastUserText(session);
+            if (lastText != null && !lastText.isEmpty()) {
+                ensureConsumer(session);
+                TriggerEvent event = new TriggerEvent(TriggerEvent.Type.SPEECH)
+                        .withSpeech(lastText);
+                session.getEventQueue().offer(event);
+            }
         }
     }
 

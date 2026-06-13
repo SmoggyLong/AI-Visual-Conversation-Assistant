@@ -20,6 +20,7 @@ public class IntentRecognizer {
     private static final String ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
     private static final String MODEL = "glm-4.5-air";
     private static final int MAX_TOKENS = 120;
+    private static final double MIN_CONFIDENCE = 0.6;
 
     private final String apiKey;
     private final ObjectMapper objectMapper;
@@ -96,7 +97,7 @@ public class IntentRecognizer {
                     "temperature", 0.1,
                     "messages", java.util.List.of(java.util.Map.of(
                             "role", "user",
-                            "content", java.util.List.of(java.util.Map.of("type", "text", "text", prompt))
+                            "content", prompt    // glm-4.5-air 用纯字符串
                     ))
             ));
             log.debug("[INTENT] 请求体: {}", body.length() > 300 ? body.substring(0, 300) : body);
@@ -133,6 +134,13 @@ public class IntentRecognizer {
             UrgencyLevel urgency = UrgencyLevel.fromString(root.get("urgency").asText(""));
             String reasoning = root.has("reasoning") ? root.get("reasoning").asText("") : "";
             double confidence = root.has("confidence") ? root.get("confidence").asDouble(0.5) : 0.5;
+
+            // 置信度过低 → 降级为 general
+            if (confidence < MIN_CONFIDENCE) {
+                log.info("[INTENT] 置信度过低({})，降级为 general", confidence);
+                return new IntentResult(IntentType.GENERAL, UrgencyLevel.NORMAL, reasoning, confidence);
+            }
+
             return new IntentResult(intent, urgency, reasoning, confidence);
         } catch (Exception e) {
             log.warn("[INTENT] JSON 解析失败: {}", content);

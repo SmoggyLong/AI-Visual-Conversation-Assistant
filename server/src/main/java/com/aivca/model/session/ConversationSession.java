@@ -56,6 +56,19 @@ public class ConversationSession {
     /** 最近一次视觉描述对应的帧校验和，用于缓存命中判断 */
     private String cachedImageChecksum;
 
+    /** 当前 episode（一次完整交互窗口） */
+    private Episode currentEpisode;
+
+    /** Vision 调用版本号（防止旧结果覆盖新结果） */
+    private int visionGeneration;
+
+    /** 事件队列（串行消费） */
+    private final java.util.concurrent.BlockingQueue<TriggerEvent> eventQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>(100);
+
+    /** 消费线程 */
+    private transient Thread consumerThread;
+
     /** 当前对话轮次计数（从 0 开始，每轮 user+assistant 递增） */
     private int conversationRound;
 

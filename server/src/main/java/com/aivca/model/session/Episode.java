@@ -1,0 +1,108 @@
+package com.aivca.model.session;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Episode —— 一次完整交互的时间窗口。
+ *
+ * 生命周期: OPEN → CLOSED → RESPONDING → 废弃
+ * 一个 session 同时最多存在一个未关闭的 episode。
+ */
+public class Episode {
+
+    /** 唯一标识（UUID 前 8 位） */
+    private final String id;
+
+    /** 创建时间 */
+    private final Instant startTime;
+
+    /** 关闭时间 */
+    private Instant closeTime;
+
+    /** 关闭原因: speech / action_end / scene_change */
+    private String closeReason;
+
+    /** episode 内用户说的话（可为 null） */
+    private String speech;
+
+    /** episode 内最新的画面描述 */
+    private String visionDesc;
+
+    /** episode 内最新的动作 */
+    private String action;
+
+    /** 是否已关闭 */
+    private boolean closed;
+
+    /** 回复冷却时长 */
+    private static final Duration RESPONSE_COOLDOWN = Duration.ofSeconds(5);
+
+    /** 上次回复时间（session 级共享） */
+    private static Instant lastResponseTime;
+
+    public Episode() {
+        this.id = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        this.startTime = Instant.now();
+    }
+
+    /** 更新画面数据 */
+    public void updateVision(String desc, String act) {
+        if (desc != null) this.visionDesc = desc;
+        if (act != null) this.action = act;
+    }
+
+    /** 设置语音（锚点） */
+    public void setSpeech(String text) {
+        this.speech = text;
+    }
+
+    /** 检查是否应该关闭 episode */
+    public boolean shouldClose() {
+        if (closed) return false;
+        // 用户说话了 → 关闭
+        if (speech != null && !speech.isEmpty()) {
+            closeReason = "speech";
+            return true;
+        }
+        // 动作状态变化（从有动作变为无动作）→ 关闭
+        if (action != null && action.contains("保持") || (action != null && action.contains("无明显"))) {
+            closeReason = "action_end";
+            return true;
+        }
+        return false;
+    }
+
+    /** 强制关闭（场景显著变化） */
+    public void forceClose(String reason) {
+        this.closeReason = reason;
+        this.closed = true;
+        this.closeTime = Instant.now();
+    }
+
+    /** 检查回复冷却是否已过 */
+    public static boolean canStartNewEpisode() {
+        return lastResponseTime == null
+                || Duration.between(lastResponseTime, Instant.now()).compareTo(RESPONSE_COOLDOWN) >= 0;
+    }
+
+    /** 标记回复已完成 */
+    public static void markResponseSent() {
+        lastResponseTime = Instant.now();
+    }
+
+    // getters
+    public String getId() { return id; }
+    public Instant getStartTime() { return startTime; }
+    public Instant getCloseTime() { return closeTime; }
+    public String getCloseReason() { return closeReason; }
+    public String getSpeech() { return speech; }
+    public String getVisionDesc() { return visionDesc; }
+    public String getAction() { return action; }
+    public boolean isClosed() { return closed; }
+
+    // setters for close
+    public void setClosed(boolean closed) { this.closed = closed; }
+    public void setCloseTime(Instant closeTime) { this.closeTime = closeTime; }
+}
