@@ -75,7 +75,7 @@ public class EpisodeConsumer implements Runnable {
         this.agentRouter = agentRouter;
         this.callback = callback;
         this.ttsService = ttsService;
-        this.visionBreaker = new CircuitBreaker("vision", 3, Duration.ofSeconds(60));
+        this.visionBreaker = new CircuitBreaker("vision", 10, Duration.ofSeconds(30));
         this.agentBreaker = new CircuitBreaker("agent", 5, Duration.ofSeconds(30));
         this.session.setConsumerThread(new Thread(this, "de-" + session.getSessionId()));
         this.session.getConsumerThread().start();
@@ -106,14 +106,6 @@ public class EpisodeConsumer implements Runnable {
     // ==================== event processing ====================
 
     private void processEvent(TriggerEvent event) {
-        if (event.getType() == TriggerEvent.Type.VISION) {
-            long age = System.currentTimeMillis() - event.getTimestamp();
-            if (age > MAX_FRAME_AGE_MS) {
-                log.debug("[EP] 丢弃过期帧 | ageMs={}", age);
-                return;
-            }
-        }
-
         switch (event.getType()) {
             case VISION -> handleVision(event);
             case SPEECH_BATCH -> handleSpeechBatch(event);
@@ -122,6 +114,13 @@ public class EpisodeConsumer implements Runnable {
 
     /** 静默画面 → 调 Vision → 画面显著变化时自动回复（15s 冷却） */
     private void handleVision(TriggerEvent event) {
+        // 过期帧先丢弃，不计入熔断计数
+        long age = System.currentTimeMillis() - event.getTimestamp();
+        if (age > MAX_FRAME_AGE_MS) {
+            log.debug("[EP] 丢弃过期帧 | ageMs={}", age);
+            return;
+        }
+
         if (!visionBreaker.allowRequest()) {
             log.debug("[EP] Vision 熔断中，跳过");
             return;
