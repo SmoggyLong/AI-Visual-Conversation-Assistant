@@ -1,6 +1,13 @@
 import { useEffect, useRef } from 'react';
 import type { ConversationMessage } from '../types/messages';
 
+const agentLabel: Record<string, string> = {
+  vision: '👁 视觉',
+  knowledge: '📚 知识',
+  conversation: '💬 对话',
+  game: '🎮 游戏',
+};
+
 interface ConversationPanelProps {
   messages: ConversationMessage[];
 }
@@ -67,6 +74,9 @@ export function ConversationPanel({ messages }: ConversationPanelProps) {
                   }
                 `}
               >
+                {msg.role === 'assistant' && msg.agent && agentLabel[msg.agent] && (
+                  <p className="text-[9px] text-gray-600 mb-1">{agentLabel[msg.agent]}</p>
+                )}
                 <p>{msg.text}</p>
                 <p className={`mt-1 text-[9px] ${
                   msg.role === 'user' ? 'text-blue-400/30' : 'text-gray-700'

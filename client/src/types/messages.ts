@@ -125,6 +125,7 @@ export interface ResponseTextPayload {
   content: string;
   role: 'assistant';
   conversationRound: number;
+  agent?: string;
 }
 
 export interface ResponseAudioPayload {
@@ -204,16 +205,12 @@ export type ConnectionState =
 
 /** 对话消息 */
 export interface ConversationMessage {
-  /** 消息唯一 ID */
   id: string;
-  /** 消息角色 */
   role: 'user' | 'assistant' | 'system';
-  /** 消息文本内容 */
   text: string;
-  /** 是否为中间结果（用户正在说话，文字尚未最终确定） */
   isInterim?: boolean;
-  /** 消息时间戳（毫秒） */
   timestamp: number;
+  agent?: string;
 }
 
 // ============================================================

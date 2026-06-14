@@ -34,6 +34,7 @@ export default function App() {
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [interimText, setInterimText] = useState('');
   const [assistantText, setAssistantText] = useState('');
+  const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<'chat' | 'knowledge' | 'eval'>('chat');
 
   const camera = useCamera({
@@ -156,7 +157,7 @@ export default function App() {
         break;
       }
       case 'RESPONSE_TEXT': {
-        const payload = msg.payload as { content: string; role: string; messageId: string };
+        const payload = msg.payload as { content: string; role: string; messageId: string; agent?: string };
         const content = payload.content;
 
         // 中间结果（流式识别进行中）
@@ -176,10 +177,12 @@ export default function App() {
             role,
             text: trimmed,
             timestamp: Date.now(),
+            agent: payload.agent || undefined,
           },
         ]);
         if (role === 'assistant') {
           setAssistantText(content.trim());
+          setCurrentAgent(payload.agent || null);
         }
         setInterimText('');
         break;
@@ -194,6 +197,7 @@ export default function App() {
         serverStatus={serverStatus}
         cameraEnabled={camera.state.enabled}
         micEnabled={microphone.state.enabled}
+        agentName={currentAgent}
       />
 
       <div className="flex-1 flex min-h-0">

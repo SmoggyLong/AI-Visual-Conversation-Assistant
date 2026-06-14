@@ -27,4 +27,7 @@ public class ResponseTextPayload {
 
     /** 当前对话轮次（从 0 开始） */
     private int conversationRound;
+
+    /** 处理本消息的 Agent 名称 */
+    private String agent;
 }

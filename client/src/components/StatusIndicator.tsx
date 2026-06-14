@@ -5,7 +5,15 @@ interface StatusIndicatorProps {
   serverStatus: StatusUpdatePayload['state'] | null;
   cameraEnabled: boolean;
   micEnabled: boolean;
+  agentName: string | null;
 }
+
+const agentConfig: Record<string, { icon: string; color: string; label: string }> = {
+  vision:       { icon: '👁', color: 'text-blue-400 bg-blue-500/10 border-blue-500/20',  label: '视觉' },
+  knowledge:    { icon: '📚', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', label: '知识' },
+  conversation: { icon: '💬', color: 'text-purple-400 bg-purple-500/10 border-purple-500/20', label: '对话' },
+  game:         { icon: '🎮', color: 'text-orange-400 bg-orange-500/10 border-orange-500/20', label: '游戏' },
+};
 
 const connectionLabel: Record<ConnectionState, string> = {
   disconnected: '未连接',
@@ -40,7 +48,9 @@ export function StatusIndicator({
   serverStatus,
   cameraEnabled,
   micEnabled,
+  agentName,
 }: StatusIndicatorProps) {
+  const ac = agentName && agentConfig[agentName];
   return (
     <div className="flex items-center justify-between px-5 py-2 border-b border-white/5 bg-gray-950/60 backdrop-blur-xl">
       <div className="flex items-center gap-4">
@@ -51,6 +61,13 @@ export function StatusIndicator({
             {connectionLabel[connectionState]}
           </span>
         </div>
+
+        {/* Agent 标识 */}
+        {ac && (
+          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${ac.color}`}>
+            {ac.icon} {ac.label}
+          </span>
+        )}
 
         {/* 服务端状态 */}
         {serverStatus && serverStatus !== 'idle' && (
