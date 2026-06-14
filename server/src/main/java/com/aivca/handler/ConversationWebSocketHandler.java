@@ -236,6 +236,10 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
             EpisodeConsumer.ResponseCallback callback = new EpisodeConsumer.ResponseCallback() {
                 @Override
                 public void onResponse(ChatResponse resp, Agent agent, int conversationRound) {
+                    if (!wsSession.isOpen()) {
+                        log.debug("[WS] 会话已关闭，跳过推送");
+                        return;
+                    }
                     sendMessage(wsSession, MessageType.RESPONSE_TEXT,
                             ResponseTextPayload.builder()
                                     .messageId("resp_" + System.currentTimeMillis())

@@ -78,13 +78,17 @@ function DeviceButton({
   const hasMultipleDevices = devices.length > 1;
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!dropdownOpen) return;
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
+      const target = e.target as Node;
+      // portal 在 document.body 下，不在 dropdownRef 内 → 需分别检查
+      if (dropdownRef.current?.contains(target) || portalRef.current?.contains(target)) {
+        return;
       }
+      setDropdownOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -165,7 +169,7 @@ function DeviceButton({
           </button>
 
           {dropdownOpen && createPortal(
-            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-48 max-h-40 overflow-y-auto rounded-xl bg-gray-900 border border-white/10 shadow-2xl z-[9999] py-1">
+            <div ref={portalRef} className="absolute bottom-10 left-1/2 -translate-x-1/2 w-48 max-h-40 overflow-y-auto rounded-xl bg-gray-900 border border-white/10 shadow-2xl z-[9999] py-1">
               <p className="px-3 py-1.5 text-[10px] text-gray-600 uppercase tracking-wider">{label}设备</p>
               {devices.map((d) => (
                 <button

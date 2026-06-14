@@ -80,6 +80,8 @@ public class EpisodeConsumer implements Runnable {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            session.getEventQueue().clear();
+            log.info("[EP] Consumer 中断，队列已清空 | sessionId={}", session.getSessionId());
         }
         log.info("[EP] Consumer 停止 | sessionId={}", session.getSessionId());
     }
@@ -107,7 +109,7 @@ public class EpisodeConsumer implements Runnable {
         }
     }
 
-    /** 静默画面 → 同步调 Vision → updateEpisode → shouldClose */
+    /** 静默画面 → 同步调 Vision → 更新 episode + session 缓存。不触发回复（只有语音说话才回复）。 */
     private void handleVision(TriggerEvent event) {
         String desc = visionService.describeBatch(event.getFrames());
         if (desc == null || desc.isEmpty()) return;
@@ -127,7 +129,7 @@ public class EpisodeConsumer implements Runnable {
                 truncate(vs.getDescription(), 60), truncate(action, 40));
 
         session.setCachedVisionDescription(desc);
-        checkAndClose(ep);
+        // VISION 只积累画面，不自动回复。回复仅在 SPEECH_BATCH 时触发。
     }
 
     /** 语音+累积帧 → Vision → setSpeech → forceClose → respond */
@@ -159,15 +161,6 @@ public class EpisodeConsumer implements Runnable {
         ep.setCloseTime(java.time.Instant.now());
         log.info("[EP-{}] ═══ EPISODE 关闭 ═══ | reason=speech", ep.getId());
         respond(ep);
-    }
-
-    private void checkAndClose(Episode ep) {
-        if (ep.shouldClose()) {
-            ep.setClosed(true);
-            ep.setCloseTime(java.time.Instant.now());
-            log.info("[EP-{}] ═══ EPISODE 关闭 ═══ | reason={}", ep.getId(), ep.getCloseReason());
-            respond(ep);
-        }
     }
 
     private void respond(Episode ep) {

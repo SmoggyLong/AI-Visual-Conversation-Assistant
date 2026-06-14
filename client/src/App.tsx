@@ -46,6 +46,18 @@ export default function App() {
   const frameBufferRef = useRef<{ data: string; checksum: string; timestamp: number }[]>([]);
   const BUFFER_MAX = 60;  // 保留最近 12 秒（5fps × 12s，覆盖最长一句话）
   const SEND_COUNT = 5;   // 每次发送最近 1 秒（5 帧）
+  const KEY_FRAME_COUNT = 5;  // 说话期间均匀采样帧数（覆盖全时间跨度）
+
+  /** 从帧缓冲中均匀采样 count 帧，始终包含首尾帧，保持时间跨度 */
+  const sampleKeyFrames = <T,>(frames: T[], count: number): T[] => {
+    if (frames.length <= count) return frames.slice();
+    const result: T[] = [];
+    const step = (frames.length - 1) / (count - 1);
+    for (let i = 0; i < count; i++) {
+      result.push(frames[Math.round(i * step)]);
+    }
+    return result;
+  };
 
   useEffect(() => {
     if (!camera.state.enabled) return;
@@ -69,10 +81,10 @@ export default function App() {
       prevPixelsRef.current = captured.thumbPixels;
       if (!speaking && !changed) return;
 
-      // 说话期间发全部缓冲帧，静默时发最近 N 帧
+      // 说话期间：均匀采样关键帧（体积恒定），静默时：发最近 N 帧
       const batch = speaking
-        ? frameBufferRef.current.slice()    // 全量
-        : frameBufferRef.current.slice(-SEND_COUNT);  // 最近 5 帧
+        ? sampleKeyFrames(frameBufferRef.current, KEY_FRAME_COUNT)
+        : frameBufferRef.current.slice(-SEND_COUNT);
       sendMessage('FRAME_DATA', {
         format: 'jpeg',
         changed: speaking || changed,

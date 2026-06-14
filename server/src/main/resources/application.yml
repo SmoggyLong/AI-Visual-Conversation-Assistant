@@ -12,7 +12,10 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       timeout: 3s
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/avca}
 
 logging:
   level:
     com.aivca: DEBUG
+    com.aivca.rag: DEBUG
