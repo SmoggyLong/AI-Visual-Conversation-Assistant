@@ -1,7 +1,7 @@
 package com.aivca.config;
 
+import com.aivca.api.tts.BaiduTtsService;
 import com.aivca.api.tts.TtsService;
-import com.aivca.api.tts.ZhipuTtsService;
 import com.aivca.rag.LlmTextCleaner;
 import com.aivca.rag.SpeechCorrector;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +27,8 @@ import java.time.Duration;
 public class RAGConfig {
 
     @Value("${ZHIPU_API_KEY}") String zhipuKey;
+    @Value("${BAIDU_ASR_API_KEY}") String baiduApiKey;
+    @Value("${BAIDU_ASR_SECRET_KEY}") String baiduSecretKey;
 
     @Bean
     EmbeddingModel embeddingModel() {
@@ -58,7 +60,7 @@ public class RAGConfig {
 
     @Bean
     TtsService ttsService(ObjectMapper objectMapper) {
-        log.info("[RAG] 初始化 ZhipuTtsService | model=tts-1");
-        return new ZhipuTtsService(zhipuKey, objectMapper);
+        log.info("[RAG] 初始化 BaiduTtsService | per=度丫丫");
+        return new BaiduTtsService(baiduApiKey, baiduSecretKey, objectMapper);
     }
 }
