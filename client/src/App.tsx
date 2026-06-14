@@ -238,6 +238,7 @@ export default function App() {
           <SpeechOverlay
             interimText={interimText}
             assistantText={assistantText}
+            serverStatus={serverStatus}
             isListening={microphone.state.enabled}
             isNetworkUnavailable={false}
           />

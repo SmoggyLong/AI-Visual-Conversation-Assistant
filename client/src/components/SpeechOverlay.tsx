@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
+import type { StatusUpdatePayload } from '../types/messages';
 
 interface SpeechOverlayProps {
   /** 当前正在识别的中间文本 */
   interimText: string;
   /** AI 回复文本（显示在字幕区，与用户说话互斥） */
   assistantText: string;
+  /** 服务端状态 */
+  serverStatus: StatusUpdatePayload['state'] | null;
   /** 是否正在监听语音 */
   isListening: boolean;
   /** 网络是否不可用 */
@@ -23,12 +26,22 @@ interface SpeechOverlayProps {
 export function SpeechOverlay({
   interimText,
   assistantText,
+  serverStatus,
   isListening,
   isNetworkUnavailable,
 }: SpeechOverlayProps) {
   const [visible, setVisible] = useState(false);
   const [displayText, setDisplayText] = useState('');
-  const [mode, setMode] = useState<'idle' | 'user' | 'assistant'>('idle');
+  const [mode, setMode] = useState<'idle' | 'user' | 'assistant' | 'thinking'>('idle');
+
+  // 服务端 thinking 状态 → 字幕框显示"思考中"
+  useEffect(() => {
+    if (serverStatus === 'thinking') {
+      setDisplayText('正在思考...');
+      setVisible(true);
+      setMode('thinking');
+    }
+  }, [serverStatus]);
 
   useEffect(() => {
     if (interimText) {
@@ -92,6 +105,22 @@ export function SpeechOverlay({
             <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
             <div className="px-6 py-4">
+              {/* ===== 思考中 ===== */}
+              {visible && mode === 'thinking' && (
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 flex gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-400/70 animate-bounce" style={{ animationDelay: '0s' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-400/70 animate-bounce" style={{ animationDelay: '0.2s' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-400/70 animate-bounce" style={{ animationDelay: '0.4s' }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-lg md:text-xl text-yellow-100/70 font-light tracking-wide animate-pulse">
+                      {displayText}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* ===== 有语音内容 ===== */}
               {visible && displayText && mode === 'user' && (
                 <div className="flex items-center gap-3">
@@ -158,7 +187,7 @@ export function SpeechOverlay({
                     : 'bg-white/20'
                   }`} />
                   <span className="text-[10px] text-white/25 uppercase tracking-widest">
-                    {mode === 'assistant' ? 'AI回复' : visible ? '识别中' : '就绪'}
+                    {mode === 'assistant' ? 'AI回复' : mode === 'thinking' ? '思考中' : visible ? '识别中' : '就绪'}
                   </span>
                 </div>
                 {displayText && (

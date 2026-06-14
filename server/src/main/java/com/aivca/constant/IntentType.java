@@ -15,7 +15,7 @@ public enum IntentType {
     GAME("game",                  "玩游戏（成语接龙、猜谜等）");
 
     private final String value;
-    private final String label;     
+    private final String label;
 
     IntentType(String value, String label) {
         this.value = value;
