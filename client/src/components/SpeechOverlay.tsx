@@ -48,8 +48,8 @@ export function SpeechOverlay({
       setDisplayText(interimText);
       setVisible(true);
       setMode('user');
-    } else if (mode !== 'assistant') {
-      // 用户说话结束后 3 秒淡出。但 AI 回复不受此超时影响，保持显示
+    } else if (mode !== 'assistant' && mode !== 'thinking') {
+      // 用户说话结束后 3 秒淡出。但 AI 回复/思考中不受此超时影响，保持显示
       const timer = setTimeout(() => {
         setVisible(false);
         setMode('idle');
