@@ -1,10 +1,24 @@
 server:
   port: 8080
+  tomcat:
+    max-http-form-post-size: 10MB
 
 spring:
   application:
     name: ai-visual-conversation
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+    mongodb:
+       uri: ${MONGODB_URI:mongodb://localhost:27017/avca}
+
+knowledge:
+  dir: ${KNOWLEDGE_DIR:../data/knowledge}
 
 logging:
   level:
     com.aivca: DEBUG
+    com.aivca.rag: DEBUG

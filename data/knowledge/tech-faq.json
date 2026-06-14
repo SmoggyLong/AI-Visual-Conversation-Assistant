@@ -1,0 +1,14 @@
+[
+  {
+    "title": "AI视觉对话助手FAQ",
+    "type": "general",
+    "keywords": ["使用,怎么用,功能,说明"],
+    "content": "AI视觉对话助手是一款集成摄像头和麦克风的智能助手。主要功能：1. 实时摄像头画面分析，AI能看到你的穿着和动作。2. 语音对话，说话即可与AI交流。3. 成语接龙游戏，说出成语AI接龙。4. 技术知识问答，询问编程和技术问题。5. 知识库检索，查询内部文档和操作流程。支持的浏览器：Chrome、Edge。需要授予摄像头和麦克风权限。"
+  },
+  {
+    "title": "系统部署说明",
+    "type": "general",
+    "keywords": ["部署,安装,启动,配置,端口"],
+    "content": "服务端基于Spring Boot 3.3.1和Java 17。启动步骤：1. 确保MongoDB运行在localhost:27017，Redis运行在localhost:6379。2. 在server目录下创建.env文件填入API密钥。3. 执行mvn spring-boot:run启动服务。4. 前端cd client && npm run dev。默认端口8080，健康检查GET /health。日志级别通过application.yml的logging.level.com.aivca配置。"
+  }
+]
