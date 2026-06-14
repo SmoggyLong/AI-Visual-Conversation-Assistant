@@ -157,7 +157,7 @@ public class KnowledgeBase {
         }
     }
 
-    /** 扫描目录，只处理新文件或已修改文件 */
+    /** 扫描目录及一层子目录，只处理新文件或已修改文件 */
     private int scanAndIngest() {
         if (!Files.exists(knowledgeDir)) {
             log.info("[KB] 知识库目录不存在: {}", knowledgeDir.toAbsolutePath());
@@ -165,39 +165,51 @@ public class KnowledgeBase {
         }
 
         int loaded = 0;
-        try (Stream<Path> files = Files.list(knowledgeDir)) {
-            for (Path file : files.toList()) {
-                if (!isSupported(file)) continue;
-
-                String sourceFile = file.getFileName().toString();
-                long fileModified = lastModified(file);
-
-                // 写入保护：文件刚被修改（>0 且距现在 < 2s），可能还在写入中，跳过等下次扫描
-                if (fileModified > 0 && System.currentTimeMillis() - fileModified < WRITE_GUARD_MS) {
-                    log.debug("[KB] 跳过可能正在写入的文件: {}", sourceFile);
-                    continue;
+        try {
+            // 根目录文件
+            loaded += scanFiles(Files.list(knowledgeDir));
+            // 一层子目录 (sop/, general/, imported/)
+            try (Stream<Path> dirs = Files.list(knowledgeDir)) {
+                for (Path dir : dirs.toList()) {
+                    if (Files.isDirectory(dir) && !dir.getFileName().toString().startsWith(".")) {
+                        loaded += scanFiles(Files.list(dir));
+                    }
                 }
-
-                // 检查是否已有同源文件
-                KnowledgeDoc existing = mongoTemplate.findOne(
-                        Query.query(Criteria.where("sourceFile").is(sourceFile)), KnowledgeDoc.class);
-
-                if (existing != null && existing.getFileModifiedAt() >= fileModified) {
-                    log.debug("[KB] 跳过未修改: {}", sourceFile);
-                    continue;
-                }
-
-                // 有旧版本 → 先删除
-                if (existing != null) {
-                    removeByDocId(existing.getDocId());
-                }
-
-                DocumentIngester.IngestResult result = ingester.ingestFile(file);
-                log.info("[KB] {} → docs={} chunks={}", result.sourceFile(), result.docCount(), result.chunkCount());
-                loaded++;
             }
         } catch (IOException e) {
             log.error("[KB] 目录扫描失败: {}", e.getMessage());
+        }
+        return loaded;
+    }
+
+    private int scanFiles(Stream<Path> files) throws IOException {
+        int loaded = 0;
+        for (Path file : files.toList()) {
+            if (!isSupported(file)) continue;
+
+            String sourceFile = file.getFileName().toString();
+            long fileModified = lastModified(file);
+
+            if (fileModified > 0 && System.currentTimeMillis() - fileModified < WRITE_GUARD_MS) {
+                log.debug("[KB] 跳过可能正在写入的文件: {}", sourceFile);
+                continue;
+            }
+
+            KnowledgeDoc existing = mongoTemplate.findOne(
+                    Query.query(Criteria.where("sourceFile").is(sourceFile)), KnowledgeDoc.class);
+
+            if (existing != null && existing.getFileModifiedAt() >= fileModified) {
+                log.debug("[KB] 跳过未修改: {}", sourceFile);
+                continue;
+            }
+
+            if (existing != null) {
+                removeByDocId(existing.getDocId());
+            }
+
+            DocumentIngester.IngestResult result = ingester.ingestFile(file);
+            log.info("[KB] {} → docs={} chunks={}", result.sourceFile(), result.docCount(), result.chunkCount());
+            loaded++;
         }
         return loaded;
     }

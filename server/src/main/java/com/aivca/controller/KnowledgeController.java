@@ -65,9 +65,10 @@ public class KnowledgeController {
 
                 if (title.isBlank() || content.isBlank()) continue;
 
-                // 写入 JSON 文件
+                // 写入 JSON 文件 — 按类型分目录
+                String subDir = "sop".equalsIgnoreCase(typeStr) ? "sop" : "general";
                 String fileName = sanitizeFileName(title) + ".json";
-                Path outFile = KNOWLEDGE_DIR.resolve(fileName);
+                Path outFile = KNOWLEDGE_DIR.resolve(subDir).resolve(fileName);
                 Map<String, Object> jsonDoc = new LinkedHashMap<>();
                 jsonDoc.put("title", title);
                 jsonDoc.put("content", content);
@@ -103,7 +104,7 @@ public class KnowledgeController {
         return Map.of("status", "ok", "files", results.size(), "newDocs", totalDocs, "newChunks", totalChunks);
     }
 
-    /** 文件上传 */
+    /** 文件上传 — 按类型分目录存储 */
     @PostMapping("/upload")
     public Map<String, Object> upload(@RequestParam("file") MultipartFile file) {
         try {
@@ -111,12 +112,13 @@ public class KnowledgeController {
             if (originalName == null || originalName.isBlank()) {
                 return Map.of("status", "error", "message", "文件名为空");
             }
-            Path dest = KNOWLEDGE_DIR.resolve(originalName);
-            Files.createDirectories(KNOWLEDGE_DIR);
+            // 按扩展名推断类型，放到对应子目录
+            String subDir = "imported";  // 默认: data/knowledge/imported/
+            Path dest = KNOWLEDGE_DIR.resolve(subDir).resolve(originalName);
+            Files.createDirectories(dest.getParent());
             file.transferTo(dest.toFile());
-            log.info("[API] 文件上传完成: {}", originalName);
+            log.info("[API] 文件上传完成: {} → {}", originalName, dest);
 
-            // 触发入库
             var result = knowledgeBase.reloadFile(dest);
             knowledgeBase.rebuildKeywordIndex();
             return Map.of("status", "ok", "fileName", originalName,
