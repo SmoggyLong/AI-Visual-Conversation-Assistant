@@ -157,6 +157,123 @@ POST /api/eval/run
 前端 → [评测] Tab → [运行评测] → 渲染报告 → [保存基线]
 ```
 
+### 实现思路
+
+#### 1. LLMJudge — LLM 裁判
+
+```java
+@Component
+public class LLMJudge {
+    // 注入 deepseek-chat
+    // judge(query, response, knowledgeContext) → JudgeScores
+
+    private static final String SYSTEM_PROMPT = "你是回答质量评估专家...";
+
+    // 核心逻辑:
+    // 1. 将 query + response + knowledgeContext 拼成 prompt
+    // 2. deepseek-chat 返回 JSON: {"relevance":0.9,"accuracy":0.85,...}
+    // 3. Jackson 解析 → JudgeScores(relevance, accuracy, completeness, helpfulness)
+    // 4. 解析失败 → 默认 0.5 分 (不给 0, 避免误杀)
+
+    public JudgeScores judge(String query, String response, String kctx) {
+        var resp = model.generate(SystemMessage.from(...), UserMessage.from(prompt));
+        String json = extractJson(resp.content().text());  // { 到 } 提取
+        var node = mapper.readTree(json);
+        return new JudgeScores(
+            node.has("relevance") ? node.get("relevance").asDouble(0.5) : 0.5,
+            ...
+        );
+    }
+}
+```
+
+**关键设计决策**:
+- 失败默认 0.5 而非 0: LLM Judge 偶发 JSON 解析失败时, 不因一次异常拉低整体分数
+- Vision 对话适配: prompt 中声明 "自然口语不算跑题"
+- 截断保护: response > 500 字截断, 避免 token 超限
+
+#### 2. Evaluator — 评测跑批器
+
+```java
+@Component
+public class Evaluator {
+    // 注入 AgentRouter, Orchestrator, KnowledgeBase, LLMJudge
+
+    public EvalReport run(List<EvalCase> cases) {
+        // 串行遍历 (避免并发干扰 LLM 调用), 逐个 evalOne
+        // 汇总: 通过率、分组(by agent)、耗时
+    }
+
+    private EvalResult evalOne(EvalCase tc) {
+        // 1. 意图识别验证
+        //    new ConversationSession → addTurn → recognizeIntent
+        //    对比 actual intent vs expectedIntent
+
+        // 2. Agent 回答生成
+        //    构造 AgentContext → AgentRouter.route → Agent.handle → ChatResponse
+
+        // 3. RAG 检索验证 (如 expectedSource 非空)
+        //    KnowledgeBase.searchHybrid → 检查命中文件名
+
+        // 4. LLM 裁判打分
+        //    LLMJudge.judge(query, response, knowledgeContext)
+
+        // 5. 断言检查
+        //    expectedKeywords → response.contains(kw)
+        //    expectedSource → knowledgeContext.contains(source)
+        //    全部通过 → allChecksPassed = true
+    }
+}
+```
+
+**关键设计决策**:
+- **串行而非并行**: 10 个案例逐个执行, 避免多个 LLM 调用互相干扰 (49 秒可接受)
+- **实时调 Agent**: 不走 WebSocket, 直接构造 AgentContext 调用 Agent.handle()
+- **分离测意图 vs 测回答**: `agent=null` 的用例只测 IntentRecognizer, 不调 Agent
+
+#### 3. EvalController — HTTP API
+
+```java
+@RestController
+@RequestMapping("/api/eval")
+public class EvalController {
+
+    @PostMapping("/run")    // 加载 test_cases.json → Evaluator.run → 返回报告
+    @PostMapping("/baseline") // 保存当前分数为基线 data/eval/baseline.json
+    @GetMapping("/report")   // 返回上一次评测报告 (缓存)
+}
+```
+
+#### 4. Test Cases 结构
+
+```json
+{
+  "id": "TC-KNOWLEDGE-01",
+  "agent": "knowledge",           // 用哪个 Agent (null=只测意图)
+  "query": "怎么退款",             // 用户问题
+  "expectedIntent": "knowledge",  // 期望的意图
+  "context": null,                // 画面上下文 (Vision 用例用)
+  "expectedKeywords": ["退款"],    // 回复中应包含的关键词
+  "expectedSource": "sop-refund.md" // RAG 检索应命中的文档
+}
+```
+
+#### 5. 前端 EvalPanel
+
+```
+useEval() → runEval/saveBaseline/fetchReport
+    │
+EvalPanel.tsx
+    ├── 标题栏: 评测 + 基线分 + 保存基线 + 运行按钮
+    ├── 通过率 汇总块
+    ├── byAgent → <details> 折叠
+    │     knowledge · 综合 0.89
+    │       rele 0.97 | accu 0.93 | comp 0.80 | help 0.87
+    │     vision · 综合 0.82
+    │       ...
+    └── 耗时
+```
+
 ### LLM 裁判 4 维打分
 
 | 维度 | 说明 | 0分 vs 1分 |
