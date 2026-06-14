@@ -271,6 +271,8 @@ export interface EvalReport {
   passedCases: number;
   elapsedMs: number;
   baselineScore: number;
+  ragHits: number;
+  ragTotal: number;
   byAgent: Record<string, AgentEvalSummary>;
   details: Record<string, EvalCaseResult[]>;
 }

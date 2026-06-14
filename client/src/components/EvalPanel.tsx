@@ -62,6 +62,14 @@ export function EvalPanel() {
                 <span className="text-gray-500">耗时</span>
                 <span className="text-gray-600 font-mono">{(report.elapsedMs / 1000).toFixed(1)}s</span>
               </div>
+              {report.ragTotal > 0 && (
+                <div className="flex justify-between text-[11px] mt-1">
+                  <span className="text-gray-500">RAG命中</span>
+                  <span className={`font-mono ${report.ragHits === report.ragTotal ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                    {report.ragHits}/{report.ragTotal} ({Math.round((report.ragHits / report.ragTotal) * 100)}%)
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* 各Agent详情 */}

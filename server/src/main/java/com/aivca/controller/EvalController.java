@@ -55,6 +55,8 @@ public class EvalController {
         result.put("passedCases", lastReport.passedCases());
         result.put("elapsedMs", lastReport.elapsedMs());
         result.put("baselineScore", baselineScore);
+        result.put("ragHits", lastReport.ragHits());
+        result.put("ragTotal", lastReport.ragTotal());
         result.put("byAgent", buildAgentSummary(lastReport));
         result.put("details", lastReport.byAgent());
 

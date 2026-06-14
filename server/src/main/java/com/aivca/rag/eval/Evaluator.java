@@ -59,12 +59,15 @@ public class Evaluator {
 
         long elapsed = System.currentTimeMillis() - start;
 
-        // 汇总
+        // 汇总 RAG 命中
+        long ragTotal = results.stream().filter(r -> r.agent() != null && r.agent().contains("knowledge")).count();
+        long ragHits = results.stream().filter(r -> r.retrievedSource() != null && !r.retrievedSource().isEmpty()).count();
+
         long total = results.size();
         long passed = results.stream().filter(r -> r.scores() != null).count();
         var byAgent = groupByAgent(results);
 
-        return new EvalReport(total, passed, byAgent, elapsed, Instant.now());
+        return new EvalReport(total, passed, byAgent, elapsed, Instant.now(), ragHits, ragTotal);
     }
 
     private EvalResult evalOne(EvalCase tc) {
@@ -151,9 +154,11 @@ public class Evaluator {
     public record EvalReport(
             long totalCases, long passedCases,
             Map<String, List<EvalResult>> byAgent,
-            long elapsedMs, Instant evaluatedAt
+            long elapsedMs, Instant evaluatedAt,
+            long ragHits, long ragTotal   // RAG命中数 / 需要RAG的用例总数
     ) {
         public double passRate() { return totalCases > 0 ? (double) passedCases / totalCases : 0; }
+        public double ragHitRate() { return ragTotal > 0 ? (double) ragHits / ragTotal : 0; }
     }
 
     /** 单个案例评测结果 */
