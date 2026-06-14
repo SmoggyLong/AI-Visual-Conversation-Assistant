@@ -9,6 +9,7 @@ import { StatusIndicator } from './components/StatusIndicator';
 import { SpeechOverlay } from './components/SpeechOverlay';
 import { ConversationPanel, nextMessageId } from './components/ConversationPanel';
 import { KnowledgePanel } from './components/KnowledgePanel';
+import { EvalPanel } from './components/EvalPanel';
 import { captureFrame, hasFrameChanged } from './utils/frameCapture';
 import type {
   ConversationMessage,
@@ -33,7 +34,7 @@ export default function App() {
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [interimText, setInterimText] = useState('');
   const [assistantText, setAssistantText] = useState('');
-  const [rightTab, setRightTab] = useState<'chat' | 'knowledge'>('chat');
+  const [rightTab, setRightTab] = useState<'chat' | 'knowledge' | 'eval'>('chat');
 
   const camera = useCamera({
     onStateChange: (payload) => sendMessage('CAMERA_CONTROL', payload),
@@ -228,11 +229,23 @@ export default function App() {
             >
               知识库
             </button>
+            <button
+              onClick={() => setRightTab('eval')}
+              className={`flex-1 py-2.5 text-[10px] font-medium tracking-wider uppercase transition-colors ${
+                rightTab === 'eval'
+                  ? 'text-orange-400/80 border-b border-orange-400/40 bg-orange-400/[0.02]'
+                  : 'text-gray-600 hover:text-gray-400'
+              }`}
+            >
+              评测
+            </button>
           </div>
           {rightTab === 'chat' ? (
             <ConversationPanel messages={conversationMessages} />
-          ) : (
+          ) : rightTab === 'knowledge' ? (
             <KnowledgePanel />
+          ) : (
+            <EvalPanel />
           )}
         </div>
       </div>

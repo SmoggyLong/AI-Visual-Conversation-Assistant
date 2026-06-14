@@ -1,0 +1,92 @@
+[
+  {
+    "id": "TC-KNOWLEDGE-01",
+    "agent": "knowledge",
+    "query": "怎么退款",
+    "expectedIntent": "knowledge",
+    "context": null,
+    "expectedKeywords": ["退款"],
+    "expectedSource": "sop-refund.md"
+  },
+  {
+    "id": "TC-KNOWLEDGE-02",
+    "agent": "knowledge",
+    "query": "NullPointerException怎么修",
+    "expectedIntent": "knowledge",
+    "context": null,
+    "expectedKeywords": ["检查", "null", "null"],
+    "expectedSource": null
+  },
+  {
+    "id": "TC-KNOWLEDGE-03",
+    "agent": "knowledge",
+    "query": "Docker镜像怎么清理",
+    "expectedIntent": "knowledge",
+    "context": null,
+    "expectedKeywords": ["docker", "prune", "清理"],
+    "expectedSource": null
+  },
+  {
+    "id": "TC-VISION-01",
+    "agent": "vision",
+    "query": "你看到了什么",
+    "expectedIntent": "vision",
+    "context": "画面中是一个戴着耳机的人，坐在电脑前",
+    "expectedKeywords": ["耳机", "电脑"],
+    "expectedSource": null
+  },
+  {
+    "id": "TC-VISION-02",
+    "agent": "vision",
+    "query": "我今天穿什么了",
+    "expectedIntent": "vision",
+    "context": "画面中的人穿着蓝色衬衫，戴着眼镜",
+    "expectedKeywords": ["蓝色", "衬衫"],
+    "expectedSource": null
+  },
+  {
+    "id": "TC-CONVERSATION-01",
+    "agent": "conversation",
+    "query": "你好",
+    "expectedIntent": "conversation",
+    "context": null,
+    "expectedKeywords": ["你好", "嗨"],
+    "expectedSource": null
+  },
+  {
+    "id": "TC-CONVERSATION-02",
+    "agent": "conversation",
+    "query": "今天天气怎么样",
+    "expectedIntent": "conversation",
+    "context": null,
+    "expectedKeywords": null,
+    "expectedSource": null
+  },
+  {
+    "id": "TC-GAME-01",
+    "agent": "game",
+    "query": "玩成语接龙",
+    "expectedIntent": "game",
+    "context": null,
+    "expectedKeywords": ["成语", "接龙"],
+    "expectedSource": null
+  },
+  {
+    "id": "TC-INTENT-01",
+    "agent": null,
+    "query": "帮我看看这段代码有什么问题",
+    "expectedIntent": "knowledge",
+    "context": null,
+    "expectedKeywords": null,
+    "expectedSource": null
+  },
+  {
+    "id": "TC-INTENT-02",
+    "agent": null,
+    "query": "再见",
+    "expectedIntent": "conversation",
+    "context": null,
+    "expectedKeywords": null,
+    "expectedSource": null
+  }
+]

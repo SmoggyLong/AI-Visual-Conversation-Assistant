@@ -1,8 +1,8 @@
-# PR: TTS 语音输出 + Circuit Breaker 熔断 + 前端知识库面板 + PDF 支持
+# PR: TTS 语音 + CircuitBreaker 熔断 + 前端知识库面板 + PDF + 评测框架
 
 ## 标题
 
-**feat: TTS语音 + CircuitBreaker熔断 + 前端知识库面板 + PDF文档支持**
+**feat: TTS语音 + CircuitBreaker熔断 + 知识库面板 + PDF + LLM评测框架**
 
 ---
 
@@ -137,3 +137,85 @@ KnowledgePanel.tsx
 | 修改 | `rag/KnowledgeBase.java` | rebuildKeywordIndex→public |
 | 修改 | `rag/DocumentParser.java` | + PDF 解析 |
 | 修改 | `controller/KnowledgeController.java` | + /add + /upload |
+
+---
+
+## 评测框架
+
+### 架构
+
+```
+POST /api/eval/run
+    → Evaluator.run(test_cases)
+        → for each case:
+            ├─ IntentRecognizer.recognizeIntent() → 验证意图
+            ├─ AgentRouter.route() → Agent.handle() → 生成回答
+            ├─ KnowledgeBase.searchHybrid() → 检查检索命中
+            └─ LLMJudge.judge(query, response, context) → 4维打分
+        → 汇总 EvalReport → 返回 JSON
+
+前端 → [评测] Tab → [运行评测] → 渲染报告 → [保存基线]
+```
+
+### LLM 裁判 4 维打分
+
+| 维度 | 说明 | 0分 vs 1分 |
+|------|------|-----------|
+| **relevance** | 是否回应用户话题 | 答非所问 vs 自然回应 |
+| **accuracy** | 信息正确性 | 胡说 vs 正确（与知识库一致） |
+| **completeness** | 信息覆盖度 | 只说一半 vs 完整步骤 |
+| **helpfulness** | 可操作性 | 空洞 vs 用户知道下一步 |
+
+> 注意: VisionAgent 的自然口语风格不算跑题——Judge prompt 已适配。
+
+### 测试用例 (10个)
+
+| 类别 | 数量 | 验证项 |
+|------|:---:|------|
+| KnowledgeAgent | 3 | 意图+关键词+知识库来源 |
+| VisionAgent | 2 | 意图+画面描述关键词 |
+| ConversationAgent | 2 | 意图+自然回复 |
+| GameAgent | 1 | 意图+游戏规则关键词 |
+| 意图识别 | 2 | 仅意图，无 Agent 回复 |
+
+### 报告解读
+
+```
+通过率 8/10 = 80%
+  └── 8个用例检查项全部通过, 2个有关键词检查未命中
+
+知识 knowledge · 综合 0.89
+  relevance 0.97    ← 回答问题很准确
+  accuracy  0.93    ← 知识库信息正确
+  completeness 0.80 ← 有些步骤没说完
+  helpfulness 0.87  ← 用户可以据此操作
+
+视觉 vision · 综合 0.82
+  relevance x.xx    ← 自然口语回应，不跑题
+  accuracy  x.xx    ← 画面描述与上下文一致
+
+对话 conversation · 综合 0.68
+  ← 开放性问题（"今天天气怎么样"），无法验证关键词通过
+
+游戏 game · 综合 1.0
+  ← 成语接龙规则明确，回答格式匹配度高
+```
+
+### 保存基线
+
+将当前评测结果保存为参照值。后续每次改 prompt 后重新评测，对比基线判断是否有退化。
+
+---
+
+## 变更文件 (评测框架)
+
+| 操作 | 文件 | 说明 |
+|------|------|------|
+| **新建** | `rag/eval/LLMJudge.java` | deepseek-chat 4维裁判 |
+| **新建** | `rag/eval/Evaluator.java` | 跑批 + 汇总 |
+| **新建** | `controller/EvalController.java` | API: run/baseline/report |
+| **新建** | `data/eval/test_cases.json` | 10个测试用例 |
+| **新建** | `client/src/components/EvalPanel.tsx` | 评测面板 |
+| **新建** | `client/src/hooks/useEval.ts` | 评测 API hooks |
+| 修改 | `client/src/App.tsx` | + [评测] Tab |
+| 修改 | `client/src/types/messages.ts` | + 评测类型 |

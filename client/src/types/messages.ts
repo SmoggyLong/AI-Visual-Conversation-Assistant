@@ -250,3 +250,30 @@ export interface DocInput {
   type: 'SOP' | 'GENERAL';
   keywords: string;
 }
+
+// ============================================================
+// 评测类型
+// ============================================================
+
+export interface JudgeScores {
+  relevance: number;
+  accuracy: number;
+  completeness: number;
+  helpfulness: number;
+  overall: number;
+}
+
+export interface AgentEvalSummary {
+  cases: number;
+  passedChecks: number;
+  avgScores: JudgeScores;
+}
+
+export interface EvalReport {
+  totalCases: number;
+  passedCases: number;
+  elapsedMs: number;
+  baselineScore: number;
+  byAgent: Record<string, AgentEvalSummary>;
+  details: Record<string, unknown>;
+}
