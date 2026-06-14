@@ -125,6 +125,14 @@ public class EpisodeConsumer implements Runnable {
             log.debug("[EP] Vision 熔断中，跳过");
             return;
         }
+
+        // 频率限流：每 3 秒最多调一次 Vision API
+        var lastAnalysis = session.getLastVisionAnalysisAt();
+        if (lastAnalysis != null && java.time.Duration.between(lastAnalysis, java.time.Instant.now()).getSeconds() < 3) {
+            return;  // 静默丢弃，不累计失败
+        }
+        session.setLastVisionAnalysisAt(java.time.Instant.now());
+
         String desc = visionService.describeBatch(event.getFrames());
         if (desc == null || desc.isEmpty()) {
             visionBreaker.recordFailure();

@@ -53,6 +53,9 @@ public class ConversationSession {
     /** 上次视觉自动回复时间（冷却 15 秒） */
     private Instant lastVisionResponseAt;
 
+    /** 上次视觉分析时间（限流：每 3 秒最多分析 1 次） */
+    private Instant lastVisionAnalysisAt;
+
     // ==================== 压缩策略常量 ====================
     static final int COMPRESS_AT = 8;
     static final int KEEP_RAW = 3;
