@@ -139,81 +139,36 @@ export default function App() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const welcomedRef = useRef(false);
-  const playAudio = (base64Mp3: string) => {
+
+  /** 播放百度 TTS MP3 音频 */
+  const playAudio = useCallback((base64Mp3: string) => {
     if (!audioRef.current) audioRef.current = new Audio();
     audioRef.current.src = 'data:audio/mp3;base64,' + base64Mp3;
     audioRef.current.play().catch(() => {});
-  };
+  }, []);
 
-  /** 浏览器内置语音合成（根据表情调整语调） */
+  /** 浏览器内置语音合成 */
   const speechSynthReady = useRef(false);
-  const pendingSpeakRef = useRef<string | null>(null);
   const bestVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
-  // 首次用户点击时预热 SpeechSynthesis + 选择最佳中文语音
+  // 首次点击预热: 激活 Audio + SpeechSynthesis
   useEffect(() => {
-    const warmup = () => {
-      if (!speechSynthReady.current && window.speechSynthesis) {
+    const warmup = async () => {
+      // 预热 Audio (解除浏览器自动播放限制)
+      if (audioRef.current) {
+        audioRef.current.src = 'data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAADcQCTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+        audioRef.current.play().catch(() => {});
+      }
+      // 预热 SpeechSynthesis
+      if (window.speechSynthesis) {
+        const v = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('zh'));
+        bestVoiceRef.current = v.find(v => v.name.includes('Huihui')) || v.find(v => v.name.includes('Kangkang')) || v[0] || null;
         window.speechSynthesis.cancel();
-        // 选最佳中文语音: 优先 Microsoft Huihui > Kangkang > Yaoyao > 任意中文voice
-        const voices = window.speechSynthesis.getVoices();
-        const zhVoices = voices.filter(v => v.lang.startsWith('zh'));
-        bestVoiceRef.current = zhVoices.find(v => v.name.includes('Huihui'))
-            || zhVoices.find(v => v.name.includes('Kangkang'))
-            || zhVoices.find(v => v.name.includes('Yaoyao'))
-            || zhVoices[0]
-            || null;
-        // Chrome 异步加载voices, 再次尝试
-        if (!bestVoiceRef.current) {
-          window.speechSynthesis.onvoiceschanged = () => {
-            const v2 = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('zh'));
-            bestVoiceRef.current = v2[0] || null;
-          };
-        }
-        const u = new SpeechSynthesisUtterance('');
-        u.volume = 0;
-        window.speechSynthesis.speak(u);
-        speechSynthReady.current = true;
-        if (pendingSpeakRef.current) {
-          doSpeak(pendingSpeakRef.current, 'happy');
-          pendingSpeakRef.current = null;
-        }
       }
     };
     document.addEventListener('click', warmup, { once: true });
     return () => document.removeEventListener('click', warmup);
   }, []);
-
-  const doSpeak = (text: string, expression?: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'zh-CN';
-    if (bestVoiceRef.current) u.voice = bestVoiceRef.current;
-
-    switch (expression) {
-      case 'happy':
-        u.rate = 1.15; u.pitch = 1.2; break;
-      case 'curious':
-        u.rate = 0.95; u.pitch = 1.1; break;
-      case 'surprised':
-        u.rate = 1.05; u.pitch = 1.3; break;
-      case 'thinking':
-        u.rate = 0.85; u.pitch = 0.95; break;
-      default:
-        u.rate = 1.0; u.pitch = 1.0; break;
-    }
-    u.volume = 0.9;
-    window.speechSynthesis.speak(u);
-  };
-
-  const speakText = (text: string, expression?: string) => {
-    if (!speechSynthReady.current) {
-      pendingSpeakRef.current = text;
-      return;
-    }
-    doSpeak(text, expression);
-  };
 
   // === 监听后端消息 ===
   onMessage(useCallback((msg: Message<ServerPayload>) => {
@@ -260,7 +215,6 @@ export default function App() {
         if (role === 'assistant') {
           setAssistantText(content.trim());
           setCurrentAgent(payload.agent || null);
-          speakText(trimmed, payload.expression);
         }
         setInterimText('');
         break;
