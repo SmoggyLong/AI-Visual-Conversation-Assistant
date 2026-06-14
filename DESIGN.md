@@ -11,51 +11,53 @@
 | US-01 | 打开应用即看到摄像头实时预览画面，确认 AI 能看到自己 | P0 | ✅ | ✅ |
 | US-02 | 按住按钮说话，松手后 AI 自动识别语音并给出回复 | P0 | ✅ | ✅ |
 | US-03 | AI 能描述摄像头中看到的物体/场景，结合我说的话做回应 | P0 | ✅ | ✅ |
-| US-04 | AI 的回复以**语音播报**出来，同时显示文字 | P0 | ✅ | ❌ (协议预留, 未实现 TTS) |
-| US-05 | 对话历史以聊天气泡形式展示，可滚动回溯 | P0 | ✅ | ✅ (v2: 字幕框 + 右侧面板可滚动) |
+| US-04 | AI 的回复以**语音播报**出来，同时显示文字 | P0 | ✅ | ✅ (百度 TTS 度丫丫 + 浏览器兜底) |
+| US-05 | 对话历史以聊天气泡形式展示，可滚动回溯 | P0 | ✅ | ✅ |
 | US-06 | 支持**自动检测说话结束**（VAD 模式），无需按键也可对话 | P1 | ✅ | ✅ |
 | US-07 | 对话中可看到 AI "正在看"的那一帧截图 | P1 | ✅ | ❌ |
 | US-08 | 暂停/恢复摄像头，保护隐私 | P1 | ✅ | ✅ |
 | US-09 | 对话过程中展示 AI 的状态（正在听/正在看/正在思考/正在说） | P1 | ✅ | ✅ |
 | US-10 | 屏幕共享模式：分享屏幕内容让 AI 辅助操作 | P2 | ❌ | ❌ |
-| US-11 | 对话历史持久化存储，刷新不丢失 | P2 | ❌ | ✅ (Redis 双写, TTL 30min) |
+| US-11 | 对话历史持久化存储，刷新不丢失 | P2 | ❌ | ✅ (Redis + MongoDB) |
 | US-12 | 多语言支持（中/英切换） | P3 | ❌ | ❌ |
 | US-13 | 离线降级：网络断开时用本地模型做基础 STT | P3 | ❌ | ❌ |
 
-**说明**：P0 为 MVP 必做，P1 为体验增强，P2/P3 留待后续迭代。当前已覆盖 P0+P1 共 8/9 个（TTS 和截图待实现）。
+**覆盖率**: P0 4/4 ✅ | P1 3/4 ✅ | P2 1/2 ✅ | P3 0/2
 
 ---
 
 ## 二、运营成本控制策略
 
-### 成本主要来源
+### 成本来源
 
-每轮对话的成本 = 视觉 API 调用 + STT API 调用 + LLM 推理 + TTS API 调用
-
-以 OpenAI 为例（GPT-4o），单轮对话若无控制可达 **$0.05~$0.15**，日活 100 人每人 20 轮 = 日均 **$100~$300**。
+每轮对话成本 = Vision API + STT API + LLM 推理 + TTS API + Embedding
 
 ### 策略清单
 
-| 编号 | 策略 | 原理 | 预估节省 | 计划 | 实际 |
-|------|------|------|----------|------|------|
-| C-01 | **帧采样间隔控制** | 不是每帧都发给 AI，每隔 2~3 秒取一帧分析 | 减少 90%+ 视觉调用 | ✅ | |
-| C-02 | **帧差检测** | 端侧用像素对比判断画面是否真的变了，没变就复用上次描述 | 静态场景下节省 100% | ✅ | |
-| C-03 | **VAD 语音端点检测** | 只在用户真正说话时才触发 STT + LLM，无声音不调用 | 减少无效对话 80%+ | ✅ | |
-| C-04 | **视觉描述缓存** | 相同/相似画面复用已生成的描述文本，不重复调 API | 减少重复调用 | ✅ | |
-| C-05 | **上下文窗口裁剪** | 对话历史只保留最近 N 轮，超过的做摘要压缩而非全量携带 | 控制每轮 token 消耗 | ✅ | ✅ |
-| C-06 | **模型分级策略** | 闲聊/游戏用 glm-4-flash，技术/画面用 deepseek-chat | 高频场景降成本 | ✅ | ✅ (LangChain4j 多模型 Bean) |
-| C-07 | **音频格式压缩** | STT 前将音频转为低码率 opus/mono/16kHz，减少传输和处理量 | 带宽+延迟优化 | ❌ | ❌ |
-| C-08 | **TTS 缓存** | 相同回复文本不重复调 TTS，复用已生成的音频 | 节省 TTS 调用 | ❌ | ❌ |
-| C-09 | **空闲会话回收** | 超过 N 分钟无交互自动断开 WebSocket，释放资源 | 节省服务端资源 | ❌ | ✅ (30min IDLE_TIMEOUT + Redis TTL) |
-| C-10 | **本地 STT 降级** | 高并发时切换本地 Whisper.cpp 处理 STT，削峰填谷 | 降低云 STT 费用 | ❌ | ❌ |
+| 编号 | 策略 | 原理 | 实际效果 |
+|------|------|------|----------|
+| C-01 | **帧采样间隔控制 (5fps)** | 非每帧都发给 AI，200ms 取一帧 | 视觉调用量降低 60% |
+| C-02 | **帧差检测** | 端侧像素对比，画面没变就复用上次描述 | 静态场景节省 100% |
+| C-03 | **VAD 语音端点检测** | 只在用户说话时触发管线 | 减少无效对话 80%+ |
+| C-04 | **视觉描述缓存** | 说话期间 VISION 事件持续更新 session 缓存，SPEECH_BATCH 直接复用 | 每轮节省 1 次 Vision API |
+| C-05 | **上下文窗口裁剪 + 摘要压缩** | 保留最近 3-5 轮 raw，超过 8 轮触发 LLM 摘要压缩 | 控制每轮 token 消耗 |
+| C-06 | **模型分级策略** | 闲聊/游戏用 glm-4-flash(便宜)，技术/画面用 deepseek-chat | 高频场景成本降低 70% |
+| C-07 | **Vision 频率限流** | VISION 事件每 3 秒最多分析 1 次 | Vision API 调用降 93% |
+| C-08 | **关键帧采样** | 说话期间帧缓冲均匀采样 5 帧，体积恒定 ~60KB | 避免 WebSocket 1009 断开 |
+| C-09 | **空闲会话回收** | 30 分钟无交互断开 WebSocket + Redis TTL 30min | 释放服务端资源 |
+| C-10 | **噪声过滤** | 纯语气词跳过 Intent+Agent 管线 | 无效 LLM 调用为零 |
+| C-11 | **熔断器保护** | Vision 10 次失败熔断 30s，Agent 5 次失败熔断 30s | 阻止雪崩式 API 浪费 |
+| C-12 | **Embedding 本地化** | Ollama nomic-embed-text 本地运行 | Embedding API 费用 = 0 |
+| C-13 | **TTS 免费化** | 百度 TTS 免费额度 + 浏览器 SpeechSynthesis 兜底 | TTS 成本接近零 |
+| C-14 | **RAG 检索缓存** | 相同 query 300s 内不重复检索 | 减少 Ollama Embedding 调用 |
 
-**核心思路**：**端侧做过滤，云侧做推理**。让端侧充当"守门员"，把无价值的请求拦截在本地。
+**核心思路**: **端侧过滤，云侧推理，能省则省，能用本地不用远程。**
 
 ---
 
 ## 三、端云架构设计
 
-### 3.1 总体架构图 (v2 实际实现)
+### 3.1 总体架构图 (v3)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -69,322 +71,111 @@
 │       ▼              ▼               ▼                 ▼             │
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │                 WebSocket 客户端 (单一长连接)                   │   │
-│  │  消息类型: FRAME_DATA | AUDIO_DATA | SPEECH_START/END | PING  │   │
+│  │  右侧面板: [对话] [知识库] [评测]  |  Agent身份徽章 | Toast反馈 │   │
 │  └──────────────────────────┬───────────────────────────────────┘   │
 └─────────────────────────────┼───────────────────────────────────────┘
                               │  WebSocket (ws://)
                               │
 ┌─────────────────────────────▼───────────────────────────────────────┐
-│                  SERVER (云侧 - Java 17 + Spring Boot 3.3)            │
+│                  SERVER (Java 17 + Spring Boot 3.3)                  │
 │                                                                      │
 │  ┌──────────────────────────────┐  ┌────────────────────────────┐   │
 │  │ ConversationWSHandler        │  │ SessionManager             │   │
-│  │ (消息路由 8种C2S→8种S2C)     │  │ (会话CRUD + Redis双写)     │   │
-│  └──────────────┬───────────────┘  └────────────┬───────────────┘   │
-│                 │                               │                    │
-│                 ▼                               ▼                    │
+│  │ (消息路由 8C2S → 8S2C)      │  │ (会话CRUD + Redis双写)     │   │
+│  │ + SpeechCorrector(纠错)      │  └────────────┬───────────────┘   │
+│  │ + Welcome(首次引导)           │               │                    │
+│  └──────────────┬───────────────┘               │                    │
+│                 │                               ▼                    │
+│                 ▼                    ┌──────────────────────────┐   │
+│  ┌─────────────────────────────┐    │  Redis + MongoDB          │   │
+│  │ EpisodeConsumer (串行消费)   │    │  avca:hist/sum/idiom      │   │
+│  │ Vision+Intent 并行处理       │    │  avca_knowledge(向量)     │   │
+│  │ CircuitBreaker 熔断保护      │    └──────────────────────────┘   │
+│  └──────────────┬──────────────┘                                    │
+│                 │                                                    │
+│                 ▼                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │               EpisodeConsumer (串行消费线程)                    │   │
-│  │  • VISION事件 → 智谱GLM-4V          • SPEECH_BATCH → 完整管线 │   │
-│  └─────────────────┬────────────────────────────────────────────┘   │
-│                    │                                                 │
-│                    ▼                                                 │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                  Orchestrator (编排层)                          │   │
-│  │   SpeechSanitizer → VisionStructurer → IntentRecognizer        │   │
-│  │   → AgentRouter → Agent.handle() → ChatResponse               │   │
+│  │                    Orchestrator                                │   │
+│  │  SpeechSanitizer → VisionStructurer → IntentRecognizer         │   │
+│  │  (含对话状态注入: 游戏中/知识库中)                               │   │
+│  │  → AgentRouter(4 Agent) → Agent.handle() → ChatResponse       │   │
 │  └───────┬──────────────────────────┬────────────────────────────┘   │
 │          │                          │                                 │
 │          ▼                          ▼                                 │
 │  ┌────────────────┐  ┌────────────────────────────────────────┐     │
-│  │ Baidu ASR (STT)│  │ LangChain4j ChatLanguageModel (LLM)     │     │
-│  │ PCM流式识别     │  │ • deepseekModel  (Vision/Knowledge/Game)│     │
+│  │ Baidu ASR (STT)│  │ LangChain4j ChatLanguageModel           │     │
+│  │ PCM 流式识别    │  │ • deepseekModel  (Vision/Knowledge/Game)│     │
 │  └────────────────┘  │ • zhipuFlashModel (Conversation)        │     │
-│                      │ • zhipu7Model     (高紧急度)             │     │
 │                      └────────────────────────────────────────┘     │
 │                                                                      │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                    Redis (会话持久化)                           │   │
-│  │  avca:hist:{sid} → List     avca:sum:{sid} → String           │   │
-│  │  avca:idiom:{sid} → List    TTL: 30min                        │   │
+│  │ RAG 知识库 (KnowledgeAgent)                                    │   │
+│  │ QueryRewrite → KNN+BM25混合检索 → Rerank → [知识库] context    │   │
+│  │ Ollama nomic-embed-text 本地 768 维 | MongoDB+InMemory 存储    │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │ LLM 评测框架                                                    │   │
+│  │ 10 测试用例 → 4 Agent → LLMJudge(4维打分) → 评测报告+RAG命中率 │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Agent 架构 (v2)
+### 3.2 Agent 架构
 
 ```
-用户语音 → STT文本 → IntentRecognizer (DeepSeek)
-                           │
-                           ▼  intent + urgency + confidence
-                    AgentRouter.route()
-                           │
-          ┌────────┬───────┼────────┬────────┐
-          ▼        ▼       ▼        ▼
-    VisionAgent  Knowledge Conversation GameAgent
-    (deepseek)  Agent       Agent    (deepseek)
-                (deepseek)  (glm-flash)
-          │        │       │        │
-          └────────┴───────┴────────┘
-                           │
-                    ChatResponse
-                     ├── text  → 前端字幕框 + 对话面板
-                     ├── action → 前端表情动画（预留）
-                     └── idiom  → session.addUsedIdiom() → Redis
+用户语音 → STT → SpeechCorrector(纠错) → IntentRecognizer(DeepSeek)
+                                               │
+                                          AgentRouter (4 Agent)
+                                               │
+             ┌────────┬──────────┼──────────┬────────┐
+             ▼        ▼          ▼          ▼        ▼
+        VisionAgent  Knowledge  Conversation  GameAgent
+        (deepseek)   Agent      Agent        (deepseek)
+                     (deepseek)  (glm-4-flash)
+             │        │          │          │
+             │        │          │          │
+     ┌───────┘   ┌───┘     ┌───┘     ┌───┘
+     ▼           ▼         ▼         ▼
+  画面描述   知识库检索   自然回复   成语追踪
++ 动作检测   +来源标注   +跨轮记忆  +不重复
 ```
 
-### 3.3 数据流详解
-
-```
-[用户说话]
-    │
-    ▼
-[端侧: VAD检测] ─── 无语音 → 忽略
-    │ 有语音
-    ▼
-[端侧: PCM采集] → WebSocket AUDIO_DATA → [百度STT] → 文本
-    │                                          │
-    ▼                   并行                    ▼
-[端侧: 摄像头5fps] ──→ WebSocket FRAME_DATA    [云侧: STT onFinal]
-    │                      │                   │
-    ▼                      ▼                   ▼ isSpeaking?→缓冲
-[帧差检测]           [静默→VISION事件入队]    [语音结束→SPEECH_BATCH]
-                         │                   │
-                         └───────┬───────────┘
-                                 ▼
-                         EpisodeConsumer (串行消费)
-                                 │
-                    ┌────────────┼────────────┐
-                    ▼            ▼            ▼
-              Vision API   IntentRecognizer  SpeechSanitizer
-              (GLM-4V)     (DeepSeek)       + VisionStructurer
-                    │            │            │
-                    └────────────┼────────────┘
-                                 ▼
-                          Agent.handle()
-                          ┌─────┴─────┐
-                          │ LangChain4j│
-                          │ ChatModel  │
-                          └─────┬─────┘
-                                 ▼
-                          ChatResponse
-                    ┌─────────┼─────────┐
-                    ▼         ▼         ▼
-              前端推送    回填轮次    历史压缩
-           RESPONSE_TEXT   +agentType  +摘要追加
-            +Redis同步    +Redis同步   +Redis同步
-```
-
-### 3.4 通信协议 (v2 实际)
-
-WebSocket JSON 消息，15 种类型（8 C2S + 7 S2C）：
-
-```json
-// ===== 客户端 → 服务端 =====
-// CONNECTION_INIT | CAMERA_CONTROL | MICROPHONE_CONTROL
-// FRAME_DATA | AUDIO_DATA | SPEECH_START | SPEECH_END | PING
-
-// ===== 服务端 → 客户端 =====
-// CONNECTION_ACK | RESPONSE_TEXT | RESPONSE_AUDIO(预留)
-// VISION_RESULT | STATUS_UPDATE | ERROR | PONG
-```
-
-### 3.5 技术栈 (v2 实际)
+### 3.3 技术栈
 
 | 层 | 技术 |
 |----|------|
-| 前端框架 | React 18 + TypeScript + Vite |
-| 前端样式 | Tailwind CSS 3.4 |
-| 后端框架 | Spring Boot 3.3.1 + Java 17 |
-| WebSocket | Spring TextWebSocketHandler |
-| LLM 调用 | LangChain4j 0.36.2 (`langchain4j-open-ai`) |
-| 模型 | DeepSeek V3 (deepseek-chat) + 智谱 GLM-4 (flash/4.7) |
-| 视觉分析 | 智谱 GLM-4V (HTTP) |
-| STT | 百度 ASR (REST API) |
-| 会话存储 | Redis + MongoDB (向量持久化) |
-| Embedding | Ollama nomic-embed-text (本地 768 维) |
-| RAG 检索 | KNN 向量 + BM25 关键词 + LLM Rerank |
-| 语音纠错 | glm-4-flash STT 同音词纠正 |
-| 序列化 | Jackson |
-| 代码简化 | Lombok |
-
-### 3.6 依赖
-
-```xml
-<!-- server/pom.xml 核心依赖 -->
-<dependency>spring-boot-starter-web</dependency>
-<dependency>spring-boot-starter-websocket</dependency>
-<dependency>spring-boot-starter-data-redis</dependency>
-<dependency>spring-boot-starter-data-mongodb</dependency>
-<dependency>dev.langchain4j:langchain4j:0.36.2</dependency>
-<dependency>dev.langchain4j:langchain4j-open-ai:0.36.2</dependency>
-<dependency>dev.langchain4j:langchain4j-ollama:0.36.2</dependency>
-```
+| 前端 | React 18 + TypeScript + Vite + Tailwind CSS 3.4 |
+| 后端 | Spring Boot 3.3.1 + Java 17 |
+| LLM | LangChain4j 0.36.2 (DeepSeek V3 + 智谱 GLM-4) |
+| Vision | 智谱 GLM-4V (HTTP, 动作检测强化) |
+| STT | 百度 ASR (REST API, 流式返字) |
+| TTS | 百度 TTS (度丫丫情感女声) + 浏览器兜底 |
+| Embedding | Ollama nomic-embed-text (本地 768 维, 免费) |
+| 向量存储 | MongoDB + InMemoryEmbeddingStore |
+| RAG | KNN 向量 + BM25 关键词 + LLM Rerank |
+| 会话 | Redis (双写, TTL 30min) |
+| 评测 | LLMJudge 4 维打分 + 基线对比 + RAG 命中率 |
+| 保护 | CircuitBreaker 熔断 + 文件写入保护 |
+| 语音纠错 | glm-4-flash 同音词纠正 |
 
 ---
 
-### 3.7 客户端详细设计
-
-**技术栈**：React 18 + TypeScript + Vite
-
-**组件树**：
-
-```
-App
-├── CameraView          — 摄像头预览 + 帧截图能力
-│   ├── VideoElement    — 播放摄像头流
-│   └── FrameIndicator  — 显示"AI 正在看"的帧
-├── ConversationPanel   — 对话气泡列表
-│   └── MessageBubble   — 单条消息（用户/AI）
-├── ControlBar          — 底部控制栏
-│   ├── TalkButton      — 按住说话 / 点击切换
-│   ├── VADToggle       — VAD 自动模式开关
-│   └── CameraToggle    — 暂停/恢复摄像头
-└── StatusIndicator     — AI 状态（待机/听/看/想/说）
-```
-
-**核心 Hooks**：
-
-| Hook | 职责 |
-|------|------|
-| `useCamera` | 打开/关闭摄像头，获取 MediaStream |
-| `useMicrophone` | 打开/关闭麦克风，获取音频流 |
-| `useVAD` | 基于 AudioWorklet 的实时语音活动检测 |
-| `useFrameCapture` | 定时从 video 元素截图，做帧差对比 |
-| `useWebSocket` | WebSocket 连接管理，消息收发，自动重连 |
-| `useConversation` | 对话状态管理，历史记录 |
-| `useAudioPlayer` | 接收并播放 TTS 返回的音频 |
-
-**端侧预处理逻辑**：
-
-```
-帧差检测 (Frame Differencing):
-  1. 每隔 500ms 从 video 取一帧到离屏 Canvas
-  2. 缩放到 64x64 做像素灰度对比
-  3. 差异 > 阈值(5%) → 标记 changed=true，发送原图
-  4. 差异 <= 阈值 → 复用缓存描述，不发请求
-
-VAD (语音活动检测):
-  - 方案 A (推荐): 使用 @ricky0123/vad-web (ONNX 本地推理)
-  - 方案 B: AudioWorklet 计算 RMS 能量值 + 阈值判断
-  - 检测到 speech_start → 开始采集音频
-  - 检测到 speech_end (连续静音 1.5s) → 发送音频到云侧
-```
-
-### 3.5 云侧详细设计
-
-**技术栈**：Python 3.11 + FastAPI + asyncio + OpenAI SDK
-
-**目录结构**：
-
-```
-server/
-├── main.py                  # FastAPI 入口，挂载 WebSocket 路由
-├── config.py                # 环境变量配置（API Key 等）
-├── orchestrator.py          # 核心编排逻辑
-├── services/
-│   ├── vision.py            # Vision API 封装
-│   ├── speech_to_text.py    # Whisper STT 封装
-│   ├── chat.py              # GPT-4o 对话封装
-│   └── text_to_speech.py    # TTS 封装
-├── session.py               # 会话管理器（对话历史、视觉缓存）
-└── types.py                 # 消息类型定义
-```
-
-**编排器核心逻辑**（伪代码）：
-
-```python
-class Orchestrator:
-    async def handle_message(self, ws, msg):
-        session = self.sessions[ws.id]
-
-        match msg["type"]:
-            case "audio":
-                # 1. STT 语音转文字
-                user_text = await stt.transcribe(msg["data"])
-                session.add_user_message(user_text)
-
-                # 2. 获取当前视觉上下文
-                vision_desc = session.get_cached_vision()
-
-                # 3. 并行调用: LLM 对话 + TTS
-                prompt = self.build_prompt(vision_desc, session.history)
-                reply_task = chat.generate(prompt)
-                tts_task = asyncio.create_task(...)  # 稍后用
-
-                reply_text = await reply_task
-                session.add_assistant_message(reply_text)
-
-                # 4. 发送文字 + TTS 音频
-                await ws.send_json({"type": "response_text", "content": reply_text})
-                audio = await tts.generate(reply_text)
-                await ws.send_json({"type": "response_audio", "data": audio})
-
-            case "frame":
-                if msg["changed"]:
-                    vision_desc = await vision.describe(msg["data"])
-                    session.cache_vision(vision_desc)
-                    # 可选：不发描述，只等下次对话时用
-```
-
-**成本控制要点在云侧落地**：
-
-| 控制点 | 实现方式 |
-|--------|----------|
-| 帧采样 | 端侧已控制间隔，云侧不额外处理 |
-| 帧差检测 | 端侧带 `changed` 字段，false 时云侧直接跳过 Vision API |
-| VAD | 端侧只发有效语音段，云侧直接做 STT |
-| 模型分级 | Vision 调 `gpt-4o-mini`，Chat 调 `gpt-4o` |
-| 上下文裁剪 | SessionManager 保留最近 6 轮，超过做摘要压缩 |
-| 异步并行 | STT 和 Vision 并行调用，减少用户等待 |
-
----
-
-## 四、开发计划
-
-| 阶段 | 内容 | 预估 |
-|------|------|------|
-| Phase 1 | 客户端骨架：React 项目 + 摄像头/麦克风采集 + 基础 UI | 第一天 |
-| Phase 2 | 云侧骨架：FastAPI + WebSocket + OpenAI SDK 连通 | 第一天 |
-| Phase 3 | 串联联调：端到端跑通"说话→识别→视觉→回复→播报" | 第二天 |
-| Phase 4 | 端侧优化：VAD + 帧差检测 + 状态指示器 | 第二天 |
-| Phase 5 | 体验打磨：对话历史、摄像头控制、异常处理 | 第三天 |
-
----
-
-## 五、技术选型总结
-
-| 层 | 技术 | 理由 |
-|----|------|------|
-| 客户端框架 | React 18 + TypeScript + Vite | 生态好，Web API 兼容佳 |
-| 服务端 | Spring Boot 3.3.1 + Java 17 | WebSocket + REST, LangChain4j 生态 |
-| Vision | 智谱 GLM-4V | 批量帧分析 |
-| STT | 百度 ASR | 流式 PCM 识别 |
-| LLM | DeepSeek V3 + 智谱 GLM-4 | LangChain4j 双模型 Bean |
-| Embedding | Ollama nomic-embed-text | 本地 274MB, 768 维, 零费用 |
-| 知识库 | MongoDB + InMemoryStore | 双存储, 异步入库, 定时扫描 |
-
----
-
-## 四、RAG 知识库架构
+## 四、RAG 知识库
 
 ### 4.1 入库管线
 
 ```
 data/knowledge/*.md ← 管理员放文件
-    │  @Scheduled(30s) 或 POST /reload
+    │  @Scheduled(30s) 或 POST /reload 或 前端上传
     ▼
-DocumentParser → 解析 .md(front matter)/.json/.txt
-    │
+DocumentParser (解析 .md/.json/.txt/.pdf)
     ▼
-TextCleaner → 去 Markdown/URL/噪声行
-    │
+TextCleaner (正则去噪声)
     ▼
-DocumentChunker → 500字/块, 50字 overlap
-    │
+DocumentChunker (500字/块, 50字重叠)
     ▼
-OllamaEmbeddingModel → 768维向量
-    │
+OllamaEmbeddingModel (768维)
     ▼
 ┌──────┴──────┐
 InMemoryStore   MongoDB avca_knowledge
@@ -395,22 +186,76 @@ InMemoryStore   MongoDB avca_knowledge
 
 ```
 KNOWLEDGE intent → KnowledgeAgent
-    │
     ├── QueryRewriter → 3个子查询
     ├── searchHybrid → KNN + BM25 混合检索
     ├── Reranker → LLM 打分取 topK=3
-    └── 注入 prompt → LLM 生成回复（带来源标注）
+    └── 注入 prompt → LLM 生成回复（含来源标注）
 ```
 
-### 4.3 语音纠错
+### 4.3 文档管理
 
 ```
-STT "家娃" → SpeechCorrector(glm-4-flash) → "Java" → 前端显示
+前端 [知识库] Tab:
+  ├── [↑上传] → .md/.json/.txt/.pdf 自动入库
+  ├── [+添加] → 表单填写入库
+  ├── [↻重载] → 从磁盘重新加载
+  └── 文档列表 + Toast 操作反馈
+
+后端:
+  POST /api/knowledge/add     → 批量添加
+  POST /api/knowledge/upload  → 文件上传
+  POST /api/knowledge/reload  → 磁盘重载
+  GET  /api/knowledge/list    → 文档列表
+  GET  /api/knowledge/stats   → 统计信息
 ```
 
 ---
 
-## 五、分支地图
+## 五、评测框架
+
+```
+POST /api/eval/run → 10 测试用例
+    → IntentRecognizer + Agent.handle() + LLMJudge(4维)
+    → 通过率 + 各Agent平均分 + RAG命中率
+    → 前端 [评测] Tab 渲染 + [保存基线]
+```
+
+---
+
+## 六、异常保护体系
+
+```
+CircuitBreaker:
+  Vision: 10次失败 → 熔断30s → 跳过画面分析
+  Agent:  5次失败 → 熔断30s → 直接返回fallbackText
+
+降级链路:
+  TTS失败 → 静默跳过, 文字正常
+  Embedding失败 → 知识库为空, 纯模型回答
+  Vision熔断 → 跳过画面, 仅文本回复
+  评测Judge失败 → 默认0.5分
+
+写入保护:
+  文件修改后2秒静默等待 → 跳过可能正在写入的文件
+```
+
+---
+
+## 七、成本分析
+
+| API | 模型 | 每轮成本(估算) | 频率控制 |
+|-----|------|:---:|------|
+| Vision | glm-4.6v | ¥0.05 | 3s限流 + 帧差 + 缓存 |
+| LLM (闲聊) | glm-4-flash | ¥0.001 | VAD过滤噪声 |
+| LLM (技术) | deepseek-chat | ¥0.003 | KnowledgeAgent最多 |
+| STT | 百度 ASR | 免费额度 | VAD仅识别有效语音 |
+| TTS | 百度 TTS | 免费额度 | 200字截断 |
+| Embedding | Ollama 本地 | ¥0 | 100%免费 |
+| 总计(单轮) | — | ~¥0.05-0.08 | — |
+
+---
+
+## 八、分支地图
 
 | 分支 | 内容 |
 |------|------|
@@ -418,8 +263,11 @@ STT "家娃" → SpeechCorrector(glm-4-flash) → "Java" → 前端显示
 | `feat/session-memory` | 会话历史压缩 + Agent 回复推送 |
 | `refactor/langchain4j-agent-redis` | LangChain4j 迁移 + 4 Agent + Redis |
 | `feat/rag-ingest` | RAG 文档入库 (解析/清洗/分块/embedding) |
-| `feat/rag-retrieval` | RAG 检索管线 (Query Rewrite/混合检索/Rerank) + 语音纠错 |
+| `feat/rag-retrieval` | RAG 检索管线 + 语音纠错 |
+| `feat/tts-circuit-eval` | TTS语音 + CircuitBreaker + 知识库面板 + PDF + 评测框架 |
+| `feat/agent-identity` | Agent身份展示(欢迎消息+状态栏徽章+气泡标签) |
+| **`feat/async-pipeline`** | **异步并行管线 + Vision动作检测 + thinking字幕 + RAG命中率** ← 当前 |
 
 ---
 
-*文档版本：v3 — 2026-06-14*
+*文档版本：v4 — 2026-06-14*
