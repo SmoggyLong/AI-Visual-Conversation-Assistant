@@ -1,338 +1,356 @@
-# PR: TTS 语音 + CircuitBreaker 熔断 + 前端知识库面板 + PDF + 评测框架
+# PR: TTS 语音 + CircuitBreaker 熔断 + 知识库面板 + PDF + 评测框架
 
 ## 标题
 
-**feat: TTS语音 + CircuitBreaker熔断 + 知识库面板 + PDF + LLM评测框架**
+**feat: TTS语音播报 + 熔断保护 + 前端知识库管理 + PDF解析 + LLM评测框架**
 
 ---
 
-## 功能描述
+## 一、功能概述
 
-### 1. TTS 语音输出 (US-04)
+本 PR 在 RAG 检索管线基础上，补齐 **5 项功能**：
 
-AI 回复不仅显示文字，还能通过语音播报出来。
-
-```
-Agent 回复文本 → ZhipuTtsService (tts-1) → base64 MP3 → RESPONSE_AUDIO → 前端播放
-```
-
-- 智谱 TTS API `tts-1` 模型
-- 截断 200 字以内
-- TTS 失败不影响主流程（非阻塞）
-
-### 2. Circuit Breaker 熔断器
-
-保护 API 调用不被重复失败打爆。
-
-| 熔断器 | 阈值 | 恢复时间 |
-|--------|:---:|:---:|
-| Vision Breaker | 3次失败 | 60s |
-| Agent Breaker | 5次失败 | 30s |
-
-三态流转: `CLOSED → OPEN → HALF_OPEN → CLOSED`
-
-### 3. 前端知识库管理面板
-
-右侧面板 Tab 切换 `[对话] [知识库]`：
-
-- 文档列表（标题/类型/文件名/块数）
-- `[↑]` 从本地文件导入 (.md/.json/.txt/.pdf)
-- `[↻]` 从磁盘重新加载
-- `[+ 添加]` 弹窗填写表单入库
-
-### 4. PDF 文档支持
-
-```java
-// PDFBox 提取文本
-PDDocument.load(file) → PDFTextStripper.getText() → 纯文本 → 分词块 → 入库
-```
+| # | 功能 | 用户故事 | 状态 |
+|---|------|----------|:--:|
+| 1 | **TTS 语音输出** | US-04 | ✅ |
+| 2 | **Circuit Breaker 熔断** | 异常保护 | ✅ |
+| 3 | **前端知识库面板** | 管理员体验 | ✅ |
+| 4 | **PDF 文档解析** | 格式扩展 | ✅ |
+| 5 | **LLM 评测框架** | 质量保障 | ✅ |
 
 ---
 
-## 实现思路
+## 二、TTS 语音输出
 
-### Circuit Breaker
+### 为什么做
 
-```java
-public class CircuitBreaker {
-    CLOSED  → 允许请求, 记录成败
-    OPEN    → 拒绝请求, wait 60s
-    HALF_OPEN → 允许1次探测, 成功→CLOSED, 失败→OPEN
-}
-```
+当前 AI 回复只在字幕框和对话面板显示文字。US-04"AI 回复以语音播报出来"是整个项目中第二高的优先级缺口——用户不盯着屏幕时无法得知 AI 说了什么。
 
-接入两个位置：
-- `EpisodeConsumer.handleVision()` → Vision API 调用前
-- `EpisodeConsumer.respond()` → Agent LLM 调用前
-
-### TTS 集成
-
-```java
-// EpisodeConsumer.respond()
-callback.onResponse(chatResp);  // 先发文字
-
-// 异步合成语音
-String audio = ttsService.synthesize(text);
-callback.onAudio(audio);  // 发语音
-
-// ConversationWSHandler
-onAudio(base64Mp3) → RESPONSE_AUDIO → 前端 Audio.play()
-```
-
-### 前端知识库面板
+### 实现
 
 ```
-useKnowledge() → fetch/list/reload/addDoc/uploadFile
-    │
-KnowledgePanel.tsx
-    ├── 文档列表 (useKnowledge.docs)
-    ├── [+ 添加] 弹窗 (addDoc)
-    ├── [↑] 本地文件 (uploadFile → FormData)
-    └── [↻] 重新加载 (reload)
+Agent 回复文本 → ZhipuTtsService (tts-1, glm-4-flash)
+    → base64 MP3 → RESPONSE_AUDIO 消息 → 前端 HTML5 Audio 播放
 ```
 
----
+**关键设计**：
 
-## 测试方式
+- **非阻塞**：TTS 合成在推文字之后执行，失败不影响文字显示
+- **截断保护**：文本超过 200 字自动截断，避免 TTS 过长
+- **静默失败**：TTS API 不可用时仅记录日志，不报错给用户
+- **前端自动播放**：收到 RESPONSE_AUDIO 后创建 `Audio` 元素自动播放，用户无需点击
 
-### TTS
-```
-用户: "你好"
-→ 前端显示文字 "你好呀！😊"
-→ 同时播放语音读出这句话
-```
-
-### 熔断
-```
-连续多次问"你好" → 正常回复
-模拟 LLM API 挂了 → 连续 5 次失败 → 直接返回 fallback 文字（不再请求LLM）
-30s 后自动恢复
-```
-
-### 知识库面板
-```
-浏览器右侧 → [知识库] Tab
-→ 查看文档列表
-→ 点 [+ 添加] → 填写表单 → 入库
-→ 点 ↑ → 选择本地 .md 文件 → 自动上传入库
-```
-
----
-
-## 变更文件
+### 涉及文件
 
 | 操作 | 文件 | 说明 |
 |------|------|------|
-| **新建** | `util/CircuitBreaker.java` | 通用熔断器 |
-| **新建** | `api/tts/TtsService.java` | TTS 接口 |
-| **新建** | `api/tts/ZhipuTtsService.java` | 智谱 TTS 实现 |
-| **新建** | `client/src/components/KnowledgePanel.tsx` | 知识库面板 |
-| **新建** | `client/src/hooks/useKnowledge.ts` | 知识库 API hooks |
-| 修改 | `pom.xml` | + spring-boot-starter-data-mongodb + PDFBox |
-| 修改 | `client/src/App.tsx` | Tab切换 + 音频播放 |
-| 修改 | `client/src/types/messages.ts` | + 知识库类型 |
-| 修改 | `service/EpisodeConsumer.java` | + CircuitBreaker + TTS |
-| 修改 | `handler/ConversationWSHandler.java` | + TtsService + onAudio 回调 |
+| 新建 | `api/tts/TtsService.java` | TTS 接口 |
+| 新建 | `api/tts/ZhipuTtsService.java` | 智谱 TTS 实现 |
 | 修改 | `config/RAGConfig.java` | + TtsService Bean |
-| 修改 | `rag/KnowledgeBase.java` | rebuildKeywordIndex→public |
-| 修改 | `rag/DocumentParser.java` | + PDF 解析 |
-| 修改 | `controller/KnowledgeController.java` | + /add + /upload |
+| 修改 | `service/EpisodeConsumer.java` | respond() 末尾调 TTS |
+| 修改 | `handler/ConversationWSHandler.java` | + onAudio 回调 → RESPONSE_AUDIO |
+| 修改 | `client/App.tsx` | + audioRef + 自动播放 |
 
 ---
 
-## 评测框架
+## 三、Circuit Breaker 熔断
+
+### 为什么做
+
+LLM API 或 Vision API 故障时，重试机制会导致每次等待 30 秒超时，多个事件排队 → 用户长达数分钟无回复。熔断器在连续失败后直接跳过调用，用户至少能立刻看到 fallback 文字。
+
+### 实现
+
+```java
+public class CircuitBreaker {
+    // 三态: CLOSED → OPEN → HALF_OPEN → CLOSED
+
+    CLOSED:   正常通过, 记录成败
+    OPEN:     直接拒绝, 返回 fallback, 等待 recoveryTimeout
+    HALF_OPEN: 允许 1 次探测请求, 成功→CLOSED, 失败→OPEN
+}
+```
+
+### 参数配置
+
+| 熔断器 | failureThreshold | recoveryTimeout | 保护对象 |
+|--------|:---:|:---:|------|
+| visionBreaker | 3 次 | 60s | ZhipuVisionService |
+| agentBreaker | 5 次 | 30s | Agent.handle() (LLM 调用) |
+
+### 接入位置
+
+```
+EpisodeConsumer
+  ├── handleVision() → visionBreaker.allowRequest()? → Vision API
+  └── respond()     → agentBreaker.allowRequest()?  → Agent.handle()
+                                                  否 → agent.fallbackText()
+```
+
+### 涉及文件
+
+| 操作 | 文件 | 说明 |
+|------|------|------|
+| 新建 | `util/CircuitBreaker.java` | 通用熔断器 (独立于业务, 可复用) |
+| 修改 | `service/EpisodeConsumer.java` | 注入 visionBreaker + agentBreaker |
+
+---
+
+## 四、前端知识库管理 + PDF 解析
+
+### 为什么做
+
+知识库文档从入库到管理完全靠命令行和 API。管理员需要一个可视化面板来查看文档、添加文档、支持更多格式。
+
+### 实现
+
+#### 前端
+
+右侧面板新增 Tab `[对话] [知识库] [评测]`：
+
+```
+[知识库] Tab:
+  ├── 标题栏: 文档统计 + [↑上传] [↻重载] [+添加]
+  ├── 文档列表: 标题/类型(SOP/通用)/文件名/块数
+  ├── [+添加] 弹窗: 标题/类型/关键词/内容 → POST /api/knowledge/add
+  └── [↑上传] 按钮: <input type="file"> → FormData → POST /api/knowledge/upload
+```
+
+#### 后端
+
+```
+POST /api/knowledge/add
+  → 前端表单 JSON → 写入 data/knowledge/{title}.json
+  → DocumentParser.parse → 清洗 → 分块 → embedding → MongoDB + InMemory
+
+POST /api/knowledge/upload
+  → MultipartFile → 保存到 data/knowledge/
+  → DocumentParser.parse (根据扩展名 .md/.json/.txt/.pdf)
+  → 入库
+```
+
+#### PDF 支持
+
+```java
+// PdfBox 3.0.3
+PDDocument.load(file) → PDFTextStripper.getText() → 纯文本
+→ TextCleaner → DocumentChunker → embedding → 入库
+```
+
+### 涉及文件
+
+| 操作 | 文件 | 说明 |
+|------|------|------|
+| 新建 | `client/components/KnowledgePanel.tsx` | 知识库面板 |
+| 新建 | `client/hooks/useKnowledge.ts` | API hooks |
+| 修改 | `client/App.tsx` | + [知识库] Tab, + min-h-0 滚动修复 |
+| 修改 | `client/types/messages.ts` | + KnowledgeDoc/DocInput 等类型 |
+| 修改 | `pom.xml` | + spring-boot-starter-data-mongodb + PDFBox 3.0.3 |
+| 修改 | `rag/DocumentParser.java` | + PDF 解析 (+4 格式: .md/.json/.txt/.pdf) |
+| 修改 | `controller/KnowledgeController.java` | + POST /add + POST /upload |
+| 修改 | `rag/KnowledgeBase.java` | rebuildKeywordIndex → public |
+
+---
+
+## 五、LLM 评测框架
+
+### 为什么做
+
+Agent 的 system prompt 频繁改动，缺少自动化的回归测试。评测框架提供：
+
+- **意图识别正确率**：改完 prompt 不会让 IntentRecognizer 把 "怎么退款" 误判为 vision
+- **Agent 回答质量**：4 维度量化评分 (相关性/准确性/完整性/实用性)
+- **RAG 检索命中率**：知识库检索是否命中了正确的文档
+- **回归检测**：对比基线发现质量退化
 
 ### 架构
 
 ```
 POST /api/eval/run
-    → Evaluator.run(test_cases)
+    → Evaluator.run(test_cases)  [串行, 10 个案例 ~50s]
         → for each case:
-            ├─ IntentRecognizer.recognizeIntent() → 验证意图
-            ├─ AgentRouter.route() → Agent.handle() → 生成回答
-            ├─ KnowledgeBase.searchHybrid() → 检查检索命中
-            └─ LLMJudge.judge(query, response, context) → 4维打分
+            ├─ IntentRecognizer → 对比 expectedIntent
+            ├─ AgentRouter → Agent.handle() → 生成回答
+            ├─ KnowledgeBase.searchHybrid() → 检查 expectedSource 命中
+            └─ LLMJudge.judge(query, response, knowledgeCtx) → 4 维打分
         → 汇总 EvalReport → 返回 JSON
 
 前端 → [评测] Tab → [运行评测] → 渲染报告 → [保存基线]
 ```
 
-### 实现思路
+### 组件
 
-#### 1. LLMJudge — LLM 裁判
-
-```java
-@Component
-public class LLMJudge {
-    // 注入 deepseek-chat
-    // judge(query, response, knowledgeContext) → JudgeScores
-
-    private static final String SYSTEM_PROMPT = "你是回答质量评估专家...";
-
-    // 核心逻辑:
-    // 1. 将 query + response + knowledgeContext 拼成 prompt
-    // 2. deepseek-chat 返回 JSON: {"relevance":0.9,"accuracy":0.85,...}
-    // 3. Jackson 解析 → JudgeScores(relevance, accuracy, completeness, helpfulness)
-    // 4. 解析失败 → 默认 0.5 分 (不给 0, 避免误杀)
-
-    public JudgeScores judge(String query, String response, String kctx) {
-        var resp = model.generate(SystemMessage.from(...), UserMessage.from(prompt));
-        String json = extractJson(resp.content().text());  // { 到 } 提取
-        var node = mapper.readTree(json);
-        return new JudgeScores(
-            node.has("relevance") ? node.get("relevance").asDouble(0.5) : 0.5,
-            ...
-        );
-    }
-}
-```
-
-**关键设计决策**:
-- 失败默认 0.5 而非 0: LLM Judge 偶发 JSON 解析失败时, 不因一次异常拉低整体分数
-- Vision 对话适配: prompt 中声明 "自然口语不算跑题"
-- 截断保护: response > 500 字截断, 避免 token 超限
-
-#### 2. Evaluator — 评测跑批器
+#### LLMJudge — LLM 裁判
 
 ```java
-@Component
-public class Evaluator {
-    // 注入 AgentRouter, Orchestrator, KnowledgeBase, LLMJudge
+deepseek-chat 作为裁判, 对每一条 Agent 回复打 4 个维度的分:
+    relevance     (相关性)  — 是否回应用户话题
+    accuracy      (准确性)  — 信息是否正确
+    completeness  (完整性)  — 是否覆盖关键信息
+    helpfulness   (实用性)  — 用户能否据此行动
 
-    public EvalReport run(List<EvalCase> cases) {
-        // 串行遍历 (避免并发干扰 LLM 调用), 逐个 evalOne
-        // 汇总: 通过率、分组(by agent)、耗时
-    }
-
-    private EvalResult evalOne(EvalCase tc) {
-        // 1. 意图识别验证
-        //    new ConversationSession → addTurn → recognizeIntent
-        //    对比 actual intent vs expectedIntent
-
-        // 2. Agent 回答生成
-        //    构造 AgentContext → AgentRouter.route → Agent.handle → ChatResponse
-
-        // 3. RAG 检索验证 (如 expectedSource 非空)
-        //    KnowledgeBase.searchHybrid → 检查命中文件名
-
-        // 4. LLM 裁判打分
-        //    LLMJudge.judge(query, response, knowledgeContext)
-
-        // 5. 断言检查
-        //    expectedKeywords → response.contains(kw)
-        //    expectedSource → knowledgeContext.contains(source)
-        //    全部通过 → allChecksPassed = true
-    }
-}
+失败兜底: 每维默认 0.5 分 (不给 0, 避免一次 JSON 解析失败拉低总分)
+Vision 适配: prompt 声明 "自然口语不算跑题"
 ```
 
-**关键设计决策**:
-- **串行而非并行**: 10 个案例逐个执行, 避免多个 LLM 调用互相干扰 (49 秒可接受)
-- **实时调 Agent**: 不走 WebSocket, 直接构造 AgentContext 调用 Agent.handle()
-- **分离测意图 vs 测回答**: `agent=null` 的用例只测 IntentRecognizer, 不调 Agent
-
-#### 3. EvalController — HTTP API
+#### Evaluator — 评测跑批器
 
 ```java
-@RestController
-@RequestMapping("/api/eval")
-public class EvalController {
-
-    @PostMapping("/run")    // 加载 test_cases.json → Evaluator.run → 返回报告
-    @PostMapping("/baseline") // 保存当前分数为基线 data/eval/baseline.json
-    @GetMapping("/report")   // 返回上一次评测报告 (缓存)
-}
+串行遍历 10 个测试用例:
+  1. 意图识别验证: 创建临时 ConversationSession → recognizeIntent → 对比
+  2. Agent 回答生成: 构造 AgentContext → route → handle → ChatResponse
+  3. RAG 检索验证: searchHybrid → 检查命中文件名
+  4. LLM 裁判打分: judge(query, response, knowledgeContext)
+  5. 断言汇总: expectedKeywords 命中 + expectedSource 命中 + intent 匹配
 ```
 
-#### 4. Test Cases 结构
+#### EvalController — HTTP API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/eval/run` | POST | 加载 test_cases.json → 跑批 → 返回报告 |
+| `/api/eval/baseline` | POST | 保存当前综合分为基线 |
+| `/api/eval/report` | GET | 返回上一次评测报告 (缓存) |
+
+#### 测试用例
 
 ```json
 {
   "id": "TC-KNOWLEDGE-01",
-  "agent": "knowledge",           // 用哪个 Agent (null=只测意图)
-  "query": "怎么退款",             // 用户问题
-  "expectedIntent": "knowledge",  // 期望的意图
-  "context": null,                // 画面上下文 (Vision 用例用)
-  "expectedKeywords": ["退款"],    // 回复中应包含的关键词
-  "expectedSource": "sop-refund.md" // RAG 检索应命中的文档
+  "agent": "knowledge",           // 用哪个Agent (null=只测意图)
+  "query": "怎么退款",             // 用户输入
+  "expectedIntent": "knowledge",  // 期望意图
+  "context": null,                // 画面上下文
+  "expectedKeywords": ["退款"],    // 回答应含的关键词
+  "expectedSource": "sop-refund.md" // RAG 应命中的文档
 }
 ```
 
-#### 5. 前端 EvalPanel
+#### 前端 EvalPanel
 
 ```
-useEval() → runEval/saveBaseline/fetchReport
-    │
-EvalPanel.tsx
-    ├── 标题栏: 评测 + 基线分 + 保存基线 + 运行按钮
-    ├── 通过率 汇总块
-    ├── byAgent → <details> 折叠
-    │     knowledge · 综合 0.89
-    │       rele 0.97 | accu 0.93 | comp 0.80 | help 0.87
-    │     vision · 综合 0.82
-    │       ...
-    └── 耗时
+[评测] Tab:
+  ├── 标题栏: 基线分 + [保存基线] + [运行评测]
+  ├── 通过率汇总: 8/10 (80%) · 49s
+  ├── byAgent 分组折叠:
+  │     knowledge · 综合 0.89
+  │       rele 0.97 | accu 0.93 | comp 0.80 | help 0.87
+  │     vision · 综合 0.82
+  │       ...
+  └── 耗时
 ```
 
-### LLM 裁判 4 维打分
+### 指标说明
 
-| 维度 | 说明 | 0分 vs 1分 |
-|------|------|-----------|
-| **relevance** | 是否回应用户话题 | 答非所问 vs 自然回应 |
-| **accuracy** | 信息正确性 | 胡说 vs 正确（与知识库一致） |
-| **completeness** | 信息覆盖度 | 只说一半 vs 完整步骤 |
-| **helpfulness** | 可操作性 | 空洞 vs 用户知道下一步 |
+| 指标 | 含义 | 高分 | 低分 |
+|------|------|:---:|:---:|
+| **通过率** | 断言检查通过比例 | 10/10 | 问题严重 |
+| **relevance** | 是否回应话题 | 自然回应 | 答非所问 |
+| **accuracy** | 信息正确性 | 与知识库一致 | 胡说 |
+| **completeness** | 关键信息覆盖 | 步骤完整 | 只说一半 |
+| **helpfulness** | 可操作性 | 用户知道下一步 | 空洞 |
+| **基线** | 历史参照值 | — | 对比是否退化 |
 
-> 注意: VisionAgent 的自然口语风格不算跑题——Judge prompt 已适配。
-
-### 测试用例 (10个)
-
-| 类别 | 数量 | 验证项 |
-|------|:---:|------|
-| KnowledgeAgent | 3 | 意图+关键词+知识库来源 |
-| VisionAgent | 2 | 意图+画面描述关键词 |
-| ConversationAgent | 2 | 意图+自然回复 |
-| GameAgent | 1 | 意图+游戏规则关键词 |
-| 意图识别 | 2 | 仅意图，无 Agent 回复 |
-
-### 报告解读
-
-```
-通过率 8/10 = 80%
-  └── 8个用例检查项全部通过, 2个有关键词检查未命中
-
-知识 knowledge · 综合 0.89
-  relevance 0.97    ← 回答问题很准确
-  accuracy  0.93    ← 知识库信息正确
-  completeness 0.80 ← 有些步骤没说完
-  helpfulness 0.87  ← 用户可以据此操作
-
-视觉 vision · 综合 0.82
-  relevance x.xx    ← 自然口语回应，不跑题
-  accuracy  x.xx    ← 画面描述与上下文一致
-
-对话 conversation · 综合 0.68
-  ← 开放性问题（"今天天气怎么样"），无法验证关键词通过
-
-游戏 game · 综合 1.0
-  ← 成语接龙规则明确，回答格式匹配度高
-```
-
-### 保存基线
-
-将当前评测结果保存为参照值。后续每次改 prompt 后重新评测，对比基线判断是否有退化。
-
----
-
-## 变更文件 (评测框架)
+### 涉及文件
 
 | 操作 | 文件 | 说明 |
 |------|------|------|
-| **新建** | `rag/eval/LLMJudge.java` | deepseek-chat 4维裁判 |
-| **新建** | `rag/eval/Evaluator.java` | 跑批 + 汇总 |
-| **新建** | `controller/EvalController.java` | API: run/baseline/report |
-| **新建** | `data/eval/test_cases.json` | 10个测试用例 |
-| **新建** | `client/src/components/EvalPanel.tsx` | 评测面板 |
-| **新建** | `client/src/hooks/useEval.ts` | 评测 API hooks |
-| 修改 | `client/src/App.tsx` | + [评测] Tab |
-| 修改 | `client/src/types/messages.ts` | + 评测类型 |
+| 新建 | `rag/eval/LLMJudge.java` | deepseek-chat 4 维裁判 |
+| 新建 | `rag/eval/Evaluator.java` | 跑批 + 汇总 |
+| 新建 | `controller/EvalController.java` | API: run/baseline/report |
+| 新建 | `data/eval/test_cases.json` | 10 个测试用例 |
+| 新建 | `client/components/EvalPanel.tsx` | 评测面板 |
+| 新建 | `client/hooks/useEval.ts` | API hooks |
+| 修改 | `client/App.tsx` | + [评测] Tab |
+| 修改 | `client/types/messages.ts` | + 评测类型 |
+
+---
+
+## 六、交互流程
+
+### 语音对话全链路
+
+```
+用户说话 → VAD → STT → SpeechCorrector 纠错 → addTurn
+    → SPEECH_BATCH → EpisodeConsumer 串行消费
+        ├─ Vision 分析 (visionBreaker 保护)
+        ├─ IntentRecognizer (DeepSeek)
+        ├─ AgentRouter → Agent.handle (agentBreaker 保护)
+        │     └─ KnowledgeAgent → RAG 检索
+        ├─ RESPONSE_TEXT → 前端显示文字 + 字幕框
+        ├─ TtsService.synthesize → RESPONSE_AUDIO → 前端播放语音
+        └─ 历史压缩 + Redis 同步
+```
+
+### 知识库管理流程
+
+```
+管理员:
+  方式1: 写 .md → 丢 data/knowledge/ → 等 30s 自动扫描
+  方式2: 写 .md → curl POST /api/knowledge/reload
+  方式3: 前端 [知识库] → [↑上传] → 选择本地文件
+  方式4: 前端 [知识库] → [+添加] → 表单填写
+
+前端 [知识库] Tab:
+  查看文档列表 → 标题/类型/块数
+  [保存基线] 按钮记录当前评测分数
+```
+
+### 评测流程
+
+```
+1. 前端 [评测] Tab → [运行评测]
+2. 后端遍历 10 个测试用例
+3. 对每个用例:
+   a. 验证意图识别 (TestCase vs IntentRecognizer)
+   b. 调 Agent 生成回答
+   c. LLM Judge 4 维打分
+   d. 断言检查 (关键词 + 来源)
+4. 汇总报告 → 前端渲染
+5. [保存基线] → 后续对比
+```
+
+### 异常降级链路
+
+```
+正常: Agent LLM → 回答
+  │
+连续 5 次失败? → agentBreaker OPEN → 直接返回 fallbackText()
+  │                                     30s 后自动探测
+  │
+Vision 连续 3 次失败? → visionBreaker OPEN → 跳过画面分析
+  │                                           60s 后自动恢复
+  │
+TTS API 失败? → 静默跳过, 不影响文字回复
+  │
+评测 LLM Judge 解析失败? → 默认 0.5 分
+```
+
+---
+
+## 七、变更文件总览
+
+| 操作 | 文件 | 功能 |
+|------|------|------|
+| 新建 | `api/tts/TtsService.java` | TTS 接口 |
+| 新建 | `api/tts/ZhipuTtsService.java` | 智谱 TTS |
+| 新建 | `util/CircuitBreaker.java` | 熔断器 |
+| 新建 | `rag/eval/LLMJudge.java` | 评测裁判 |
+| 新建 | `rag/eval/Evaluator.java` | 评测跑批 |
+| 新建 | `controller/EvalController.java` | 评测 API |
+| 新建 | `data/eval/test_cases.json` | 测试用例 |
+| 新建 | `client/components/KnowledgePanel.tsx` | 知识库面板 |
+| 新建 | `client/components/EvalPanel.tsx` | 评测面板 |
+| 新建 | `client/hooks/useKnowledge.ts` | 知识库 hooks |
+| 新建 | `client/hooks/useEval.ts` | 评测 hooks |
+| 修改 | `pom.xml` | + MongoDB + PDFBox |
+| 修改 | `service/EpisodeConsumer.java` | + breaker + TTS |
+| 修改 | `handler/ConversationWSHandler.java` | + TTS 回调 |
+| 修改 | `config/RAGConfig.java` | + TtsService Bean |
+| 修改 | `rag/DocumentParser.java` | + PDF 解析 |
+| 修改 | `rag/KnowledgeBase.java` | KeywordIndex public |
+| 修改 | `controller/KnowledgeController.java` | + /add + /upload |
+| 修改 | `client/App.tsx` | Tab 切换 + 音频播放 |
+| 修改 | `client/types/messages.ts` | 类型扩展 |
+
+**合计: 10 新建 + 8 修改**
