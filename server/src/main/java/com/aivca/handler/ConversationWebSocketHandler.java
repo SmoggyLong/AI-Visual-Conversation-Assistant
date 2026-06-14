@@ -179,6 +179,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                         .messageId("welcome_" + System.currentTimeMillis())
                         .role("assistant")
                         .agent("conversation")
+                        .expression("happy")
                         .content("你好！我是小灵，你的 AI 视觉助手～我能通过摄像头看到你，也能跟你聊天。你可以问我看到了什么、问我技术问题、或者一起玩成语接龙。跟我说话吧～")
                         .conversationRound(0)
                         .build());

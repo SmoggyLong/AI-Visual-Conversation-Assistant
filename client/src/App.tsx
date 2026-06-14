@@ -146,13 +146,35 @@ export default function App() {
   };
 
   /** 浏览器内置语音合成（根据表情调整语调） */
-  const speakText = (text: string, expression?: string) => {
+  const speechSynthReady = useRef(false);
+  const pendingSpeakRef = useRef<string | null>(null);
+
+  // 首次用户点击时预热 SpeechSynthesis（浏览器自动播放策略）
+  useEffect(() => {
+    const warmup = () => {
+      if (!speechSynthReady.current && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance('');
+        u.volume = 0;
+        window.speechSynthesis.speak(u);
+        speechSynthReady.current = true;
+        // 处理积压的待播消息
+        if (pendingSpeakRef.current) {
+          doSpeak(pendingSpeakRef.current, 'happy');
+          pendingSpeakRef.current = null;
+        }
+      }
+    };
+    document.addEventListener('click', warmup, { once: true });
+    return () => document.removeEventListener('click', warmup);
+  }, []);
+
+  const doSpeak = (text: string, expression?: string) => {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'zh-CN';
 
-    // 根据表情调整语速和音调
     switch (expression) {
       case 'happy':
         u.rate = 1.15; u.pitch = 1.15; break;
@@ -162,11 +184,19 @@ export default function App() {
         u.rate = 1.05; u.pitch = 1.25; break;
       case 'thinking':
         u.rate = 0.85; u.pitch = 0.95; break;
-      default:  // neutral
+      default:
         u.rate = 1.0; u.pitch = 1.0; break;
     }
     u.volume = 0.8;
     window.speechSynthesis.speak(u);
+  };
+
+  const speakText = (text: string, expression?: string) => {
+    if (!speechSynthReady.current) {
+      pendingSpeakRef.current = text;
+      return;
+    }
+    doSpeak(text, expression);
   };
 
   // === 监听后端消息 ===
