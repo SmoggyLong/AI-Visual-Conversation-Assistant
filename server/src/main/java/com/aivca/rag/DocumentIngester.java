@@ -59,12 +59,8 @@ public class DocumentIngester {
         int totalChunks = 0;
 
         for (DocumentParser.ParsedDocument doc : docs) {
-            // 2. 清洗（LLM 优先，失败降级正则）
-            String clean = llmCleaner.clean(doc.content());
-            if (clean == null || clean.isBlank()) {
-                log.info("[INGEST] LLM 清洗失败/为空，降级正则 | title={}", doc.title());
-                clean = TextCleaner.clean(doc.content());
-            }
+            // 2. 清洗（正则，LLM 清洗超时暂跳）
+            String clean = TextCleaner.clean(doc.content());
             if (clean == null || clean.isBlank()) {
                 log.info("[INGEST] 清洗后为空 | title={}", doc.title());
                 continue;
@@ -92,10 +88,12 @@ public class DocumentIngester {
             String docId = doc.id();
 
             // 6. 逐块入库
-            for (int i = 0; i < chunks.size(); i++) {
-                String chunkId = docId + "_" + i;
+            for (int i = 0; i < chunks.size() && i < embeddings.size(); i++) {
                 String chunkText = chunks.get(i);
                 Embedding emb = embeddings.get(i);
+                if (emb == null) continue;  // embedding 失败，跳过该块
+
+                String chunkId = docId + "_" + i;
 
                 // 6a. InMemoryEmbeddingStore
                 TextSegment segment = TextSegment.from(chunkText,
@@ -133,7 +131,7 @@ public class DocumentIngester {
         return new IngestResult(totalDocs, totalChunks, sourceFile, "OK");
     }
 
-    /** 批量调用 embedding API（16 条/批） */
+    /** 批量调用 embedding API（16 条/批）。失败时不填 null，直接跳过该批。 */
     private List<Embedding> batchEmbed(List<String> texts) {
         List<Embedding> all = new ArrayList<>();
         for (int i = 0; i < texts.size(); i += EMBED_BATCH_SIZE) {
@@ -145,8 +143,8 @@ public class DocumentIngester {
                 all.addAll(resp.content());
                 log.debug("[EMBED] 批次 {}-{} / {} 完成", i, end, texts.size());
             } catch (Exception e) {
-                log.error("[EMBED] 批次失败 | range=[{},{}] | {}", i, end, e.getMessage());
-                for (int j = i; j < end; j++) all.add(null);
+                log.error("[EMBED] 批次失败，跳过 | range=[{},{}] | {}", i, end, e.getMessage());
+                // 不填 null，跳过该批让后续的 ingest 逻辑自然返回空
             }
         }
         return all;

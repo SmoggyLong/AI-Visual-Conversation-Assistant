@@ -7,9 +7,11 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -21,11 +23,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap.KeySetView;
 import java.util.stream.Stream;
 
 /**
- * 知识库核心 —— 启动加载、关键词索引、检索（Phase 3b 接入 KnowledgeAgent）。
+ * 知识库核心 —— 异步入库、定时扫描、关键词索引、检索。
  */
 @Slf4j
 @Component
@@ -39,12 +40,18 @@ public class KnowledgeBase {
     /** 关键词 → docId 倒排索引（BM25） */
     private final Map<String, Set<String>> keywordIndex = new ConcurrentHashMap<>();
 
-    private static final Path KNOWLEDGE_DIR = Paths.get("data/knowledge");
+    @Value("${knowledge.dir:../data/knowledge}")
+    private String knowledgeDirStr;
+
+    private Path knowledgeDir;
+
+    /** 知识库是否已加载完毕 */
+    private volatile boolean ready = false;
+
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("md", "json", "txt");
 
-    static {
-        try { Files.createDirectories(KNOWLEDGE_DIR); } catch (IOException ignored) {}
-    }
+    /** 文件写入保护：修改时间和当前时间差 < 此值 → 文件可能还在写入中，跳过 */
+    private static final long WRITE_GUARD_MS = 2000;
 
     public KnowledgeBase(MongoTemplate mongoTemplate,
                           EmbeddingStore<TextSegment> embeddingStore,
@@ -56,30 +63,73 @@ public class KnowledgeBase {
         this.ingester = ingester;
     }
 
-    // ==================== 启动加载 ====================
+    // ==================== 启动加载（异步，不阻塞服务） ====================
 
     @PostConstruct
-    void loadOnStartup() {
-        log.info("[KB] ═══ 启动知识库加载 ═══");
+    void init() {
+        knowledgeDir = Paths.get(knowledgeDirStr).toAbsolutePath().normalize();
+        log.info("[KB] 知识库目录: {}", knowledgeDir);
+        try { Files.createDirectories(knowledgeDir); } catch (IOException ignored) {}
+
+        // 异步加载，不阻塞 Spring 启动
+        new Thread(this::loadOnStartup, "kb-loader").start();
+    }
+
+    /** 是否可检索 */
+    public boolean isReady() { return ready; }
+
+    /** 后台加载：MongoDB → 内存 + 目录扫描 */
+    private void loadOnStartup() {
+        log.info("[KB] ═══ 后台知识库加载开始 ═══");
         long start = System.currentTimeMillis();
 
-        // 1. 检查 MongoDB 是否有数据 → 加载到内存
-        long mongoCount = mongoTemplate.count(new Query(), KnowledgeDoc.class);
-        log.info("[KB] MongoDB 已有 {} 个向量块", mongoCount);
-
-        if (mongoCount > 0) {
-            loadFromMongoToMemory();
+        // 1. MongoDB → InMemory
+        try {
+            long mongoCount = mongoTemplate.count(new Query(), KnowledgeDoc.class);
+            log.info("[KB] MongoDB 已有 {} 个向量块", mongoCount);
+            if (mongoCount > 0) {
+                loadFromMongoToMemory();
+            }
+        } catch (Exception e) {
+            log.warn("[KB] MongoDB 加载失败: {}", e.getMessage());
         }
 
         // 2. 扫描目录 → 增量入库
-        int loaded = scanAndIngest();
+        int loaded = 0;
+        try {
+            loaded = scanAndIngest();
+        } catch (Exception e) {
+            log.warn("[KB] 文档入库失败: {}", e.getMessage());
+        }
 
         // 3. 重建关键词索引
-        rebuildKeywordIndex();
+        try {
+            rebuildKeywordIndex();
+        } catch (Exception e) {
+            log.warn("[KB] 关键词索引重建失败: {}", e.getMessage());
+        }
 
+        ready = true;
         long elapsed = System.currentTimeMillis() - start;
-        log.info("[KB] ═══ 启动完成 | 耗时{}ms | 内存块数={} | 关键词条目={} | 新入文件={} ═══",
+        log.info("[KB] ═══ 加载完成 | 耗时{}ms | 内存块数={} | 关键词条目={} | 新入文件={} ═══",
                 elapsed, embeddingStoreSize(), keywordIndexSize(), loaded);
+    }
+
+    // ==================== 定时自动扫描 ====================
+
+    /** 每 30 秒扫描一次目录，自动入库新增/修改的文件 */
+    @Scheduled(fixedDelay = 30_000)
+    void autoScan() {
+        if (!ready) return;  // 首次加载完成前不重复扫
+        try {
+            int loaded = scanAndIngest();
+            if (loaded > 0) {
+                log.info("[KB] 自动扫描入库 {} 个文件", loaded);
+                rebuildKeywordIndex();
+            }
+        } catch (Exception e) {
+            log.warn("[KB] 自动扫描失败: {}", e.getMessage());
+        }
     }
 
     /** MongoDB → InMemory */
@@ -109,18 +159,24 @@ public class KnowledgeBase {
 
     /** 扫描目录，只处理新文件或已修改文件 */
     private int scanAndIngest() {
-        if (!Files.exists(KNOWLEDGE_DIR)) {
-            log.info("[KB] 知识库目录不存在: {}", KNOWLEDGE_DIR.toAbsolutePath());
+        if (!Files.exists(knowledgeDir)) {
+            log.info("[KB] 知识库目录不存在: {}", knowledgeDir.toAbsolutePath());
             return 0;
         }
 
         int loaded = 0;
-        try (Stream<Path> files = Files.list(KNOWLEDGE_DIR)) {
+        try (Stream<Path> files = Files.list(knowledgeDir)) {
             for (Path file : files.toList()) {
                 if (!isSupported(file)) continue;
 
                 String sourceFile = file.getFileName().toString();
                 long fileModified = lastModified(file);
+
+                // 写入保护：文件刚被修改（>0 且距现在 < 2s），可能还在写入中，跳过等下次扫描
+                if (fileModified > 0 && System.currentTimeMillis() - fileModified < WRITE_GUARD_MS) {
+                    log.debug("[KB] 跳过可能正在写入的文件: {}", sourceFile);
+                    continue;
+                }
 
                 // 检查是否已有同源文件
                 KnowledgeDoc existing = mongoTemplate.findOne(
@@ -188,8 +244,8 @@ public class KnowledgeBase {
     /** 重载目录所有文件 */
     public List<DocumentIngester.IngestResult> reloadAll() {
         List<DocumentIngester.IngestResult> results = new ArrayList<>();
-        if (!Files.exists(KNOWLEDGE_DIR)) return results;
-        try (Stream<Path> files = Files.list(KNOWLEDGE_DIR)) {
+        if (!Files.exists(knowledgeDir)) return results;
+        try (Stream<Path> files = Files.list(knowledgeDir)) {
             for (Path file : files.toList()) {
                 if (isSupported(file)) {
                     results.add(reloadFile(file));

@@ -13,7 +13,10 @@ spring:
       password: ${REDIS_PASSWORD:}
       timeout: 3s
     mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/avca}
+       uri: ${MONGODB_URI:mongodb://localhost:27017/avca}
+
+knowledge:
+  dir: ${KNOWLEDGE_DIR:../data/knowledge}
 
 logging:
   level:
