@@ -5,6 +5,7 @@ import com.aivca.agent.AgentRouter;
 import com.aivca.agent.Agent;
 import com.aivca.agent.model.AgentContext;
 import com.aivca.agent.model.ChatResponse;
+import com.aivca.api.tts.TtsService;
 import com.aivca.constant.IntentType;
 import com.aivca.api.vision.VisionService;
 import com.aivca.api.vision.ZhipuVisionService;
@@ -12,12 +13,14 @@ import com.aivca.handler.Orchestrator;
 import com.aivca.model.session.ConversationSession;
 import com.aivca.model.session.Episode;
 import com.aivca.model.session.TriggerEvent;
+import com.aivca.util.CircuitBreaker;
 import com.aivca.util.SpeechSanitizer;
 import com.aivca.util.VisionStructurer;
 import com.aivca.util.HistoryFormatter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,6 +43,9 @@ public class EpisodeConsumer implements Runnable {
     private final VisionService visionService;
     private final AgentRouter agentRouter;
     private final ResponseCallback callback;
+    private final TtsService ttsService;
+    private final CircuitBreaker visionBreaker;
+    private final CircuitBreaker agentBreaker;
     private volatile boolean running = true;
 
     /** 超过 3 秒的静默帧视为过期丢弃 */
@@ -51,21 +57,23 @@ public class EpisodeConsumer implements Runnable {
      */
     @FunctionalInterface
     public interface ResponseCallback {
-        /** Agent 回复就绪，推送给前端 */
         void onResponse(ChatResponse resp, Agent agent, int conversationRound);
-
-        /** 异常/状态通知 */
         default void onStatus(String detail) {}
+        default void onAudio(String base64Mp3) {}
     }
 
     public EpisodeConsumer(ConversationSession session, Orchestrator orchestrator,
                            String zhipuApiKey, ObjectMapper objectMapper,
-                           AgentRouter agentRouter, ResponseCallback callback) {
+                           AgentRouter agentRouter, ResponseCallback callback,
+                           TtsService ttsService) {
         this.session = session;
         this.orchestrator = orchestrator;
         this.visionService = new ZhipuVisionService(zhipuApiKey, objectMapper);
         this.agentRouter = agentRouter;
         this.callback = callback;
+        this.ttsService = ttsService;
+        this.visionBreaker = new CircuitBreaker("vision", 3, Duration.ofSeconds(60));
+        this.agentBreaker = new CircuitBreaker("agent", 5, Duration.ofSeconds(30));
         this.session.setConsumerThread(new Thread(this, "de-" + session.getSessionId()));
         this.session.getConsumerThread().start();
     }
@@ -111,8 +119,16 @@ public class EpisodeConsumer implements Runnable {
 
     /** 静默画面 → 同步调 Vision → 更新 episode + session 缓存。不触发回复（只有语音说话才回复）。 */
     private void handleVision(TriggerEvent event) {
+        if (!visionBreaker.allowRequest()) {
+            log.debug("[EP] Vision 熔断中，跳过");
+            return;
+        }
         String desc = visionService.describeBatch(event.getFrames());
-        if (desc == null || desc.isEmpty()) return;
+        if (desc == null || desc.isEmpty()) {
+            visionBreaker.recordFailure();
+            return;
+        }
+        visionBreaker.recordSuccess();
 
         VisionStructurer vs = VisionStructurer.parse(desc);
         String action = vs.getAction() != null ? vs.getAction() : "";
@@ -188,7 +204,19 @@ public class EpisodeConsumer implements Runnable {
             agentCtx.setConversationSummary(session.getConversationSummary());
             agentCtx.setUsedIdioms(session.getUsedIdioms());
 
-            ChatResponse chatResp = agent.handle(agentCtx);
+            // Agent LLM 调用（带熔断保护）
+            ChatResponse chatResp;
+            if (!agentBreaker.allowRequest()) {
+                log.info("[EP-{}] Agent 熔断中，使用 fallback", ep.getId());
+                chatResp = new ChatResponse(agent.fallbackText(), "idle", "neutral");
+            } else {
+                chatResp = agent.handle(agentCtx);
+                if (chatResp.getText() != null && chatResp.getText().contains(agent.fallbackText())) {
+                    agentBreaker.recordFailure();
+                } else {
+                    agentBreaker.recordSuccess();
+                }
+            }
             log.info("[EP-{}] AGENT | agent={} | text={} | action={} | expression={} | idiom={}",
                     ep.getId(), agent.name(),
                     chatResp.getText().length() > 50
@@ -210,6 +238,16 @@ public class EpisodeConsumer implements Runnable {
                 callback.onResponse(chatResp, agent, session.getConversationRound());
             } catch (Exception e) {
                 log.warn("[EP-{}] 推送回复失败", ep.getId(), e);
+            }
+
+            // TTS 语音合成（异步，不阻塞主流程）
+            try {
+                String audio = ttsService.synthesize(chatResp.getText());
+                if (audio != null) {
+                    callback.onAudio(audio);
+                }
+            } catch (Exception e) {
+                log.debug("[EP-{}] TTS 合成失败（非阻塞）: {}", ep.getId(), e.getMessage());
             }
 
             // 检查是否需要压缩历史

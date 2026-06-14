@@ -18,6 +18,10 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+
 /**
  * 文档解析器 —— 支持 .md (YAML front matter) / .json / .txt。
  */
@@ -25,7 +29,7 @@ import java.util.regex.Pattern;
 public final class DocumentParser {
 
     private static final Pattern FRONT_MATTER = Pattern.compile("^---\\s*\\n(.*?)\\n---\\s*\\n(.*)", Pattern.DOTALL);
-    private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("md", "json", "txt");
+    private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("md", "json", "txt", "pdf");
 
     private static final ObjectMapper mapper = new ObjectMapper();
 
@@ -44,13 +48,19 @@ public final class DocumentParser {
             return List.of();
         }
 
+        String sourceFile = file.getFileName().toString();
+
         try {
+            // PDF 单独处理（二进制）
+            if ("pdf".equals(ext)) {
+                return parsePdf(file, sourceFile);
+            }
+
             String raw = Files.readString(file, StandardCharsets.UTF_8);
             if (raw.isBlank()) {
-                log.debug("[PARSER] 跳过空文件: {}", file.getFileName());
+                log.debug("[PARSER] 跳过空文件: {}", sourceFile);
                 return List.of();
             }
-            String sourceFile = file.getFileName().toString();
 
             return switch (ext) {
                 case "md"  -> parseMarkdown(raw, sourceFile);
@@ -59,7 +69,7 @@ public final class DocumentParser {
                 default -> List.of();
             };
         } catch (IOException e) {
-            log.warn("[PARSER] 文件读取失败: {} | {}", file.getFileName(), e.getMessage());
+            log.warn("[PARSER] 文件读取失败: {} | {}", sourceFile, e.getMessage());
             return List.of();
         }
     }
@@ -118,6 +128,23 @@ public final class DocumentParser {
     private static List<ParsedDocument> parsePlainText(String raw, String sourceFile) {
         String title = stripExtension(sourceFile);
         return List.of(new ParsedDocument(title, raw.trim(), DocType.GENERAL, List.of(), sourceFile));
+    }
+
+    private static List<ParsedDocument> parsePdf(Path file, String sourceFile) {
+        try (PDDocument doc = Loader.loadPDF(file.toFile())) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            String text = stripper.getText(doc);
+            if (text == null || text.isBlank()) {
+                log.info("[PARSER] PDF 无文本内容: {}", sourceFile);
+                return List.of();
+            }
+            String title = stripExtension(sourceFile);
+            log.info("[PARSER] PDF 解析成功 | {} → {} 字", sourceFile, text.length());
+            return List.of(new ParsedDocument(title, text.trim(), DocType.GENERAL, List.of(), sourceFile));
+        } catch (Exception e) {
+            log.warn("[PARSER] PDF 解析失败: {} | {}", sourceFile, e.getMessage());
+            return List.of();
+        }
     }
 
     // ==================== 辅助方法 ====================

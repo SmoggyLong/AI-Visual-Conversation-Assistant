@@ -12,6 +12,7 @@ import com.aivca.agent.AgentRouter;
 import com.aivca.agent.model.ChatResponse;
 import com.aivca.api.stt.SttService;
 import com.aivca.api.stt.BaiduSttService;
+import com.aivca.api.tts.TtsService;
 import com.aivca.api.vision.VisionService;
 import com.aivca.api.vision.ZhipuVisionService;
 import com.aivca.rag.KnowledgeBase;
@@ -42,6 +43,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     private final VisionService visionService;
     private final SpeechCorrector corrector;
     private final KnowledgeBase knowledgeBase;
+    private final TtsService ttsService;
 
     private final String zhipuApiKey;
     private final String baiduApiKey;
@@ -55,6 +57,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                                          AgentRouter agentRouter, Orchestrator orchestrator,
                                          SpeechCorrector corrector,
                                          KnowledgeBase knowledgeBase,
+                                         TtsService ttsService,
                                          @Value("${ZHIPU_API_KEY:}")   String zhipuApiKey,
                                          @Value("${BAIDU_ASR_API_KEY:}") String baiduApiKey,
                                          @Value("${BAIDU_ASR_SECRET_KEY:}") String baiduSecretKey) {
@@ -64,6 +67,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
         this.orchestrator = orchestrator;
         this.corrector = corrector;
         this.knowledgeBase = knowledgeBase;
+        this.ttsService = ttsService;
         this.zhipuApiKey = zhipuApiKey;
         this.baiduApiKey = baiduApiKey;
         this.baiduSecretKey = baiduSecretKey;
@@ -261,9 +265,21 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                 public void onStatus(String detail) {
                     sendStatus(wsSession, StatusUpdatePayload.State.error, detail);
                 }
+
+                @Override
+                public void onAudio(String base64Mp3) {
+                    if (!wsSession.isOpen()) return;
+                    sendMessage(wsSession, MessageType.RESPONSE_AUDIO,
+                            ResponseAudioPayload.builder()
+                                    .text("")
+                                    .format("mp3")
+                                    .data(base64Mp3)
+                                    .duration(0)
+                                    .build());
+                }
             };
             return new EpisodeConsumer(session, orchestrator, zhipuApiKey, objectMapper,
-                    agentRouter, callback);
+                    agentRouter, callback, ttsService);
         });
     }
 

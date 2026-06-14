@@ -8,6 +8,7 @@ import { ControlBar } from './components/ControlBar';
 import { StatusIndicator } from './components/StatusIndicator';
 import { SpeechOverlay } from './components/SpeechOverlay';
 import { ConversationPanel, nextMessageId } from './components/ConversationPanel';
+import { KnowledgePanel } from './components/KnowledgePanel';
 import { captureFrame, hasFrameChanged } from './utils/frameCapture';
 import type {
   ConversationMessage,
@@ -32,6 +33,7 @@ export default function App() {
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [interimText, setInterimText] = useState('');
   const [assistantText, setAssistantText] = useState('');
+  const [rightTab, setRightTab] = useState<'chat' | 'knowledge'>('chat');
 
   const camera = useCamera({
     onStateChange: (payload) => sendMessage('CAMERA_CONTROL', payload),
@@ -133,11 +135,23 @@ export default function App() {
   const isSpeakingRef = useRef(false);
   isSpeakingRef.current = speechState.isSpeaking;
 
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playAudio = (base64Mp3: string) => {
+    if (!audioRef.current) audioRef.current = new Audio();
+    audioRef.current.src = 'data:audio/mp3;base64,' + base64Mp3;
+    audioRef.current.play().catch(() => {});
+  };
+
   // === 监听后端消息 ===
   onMessage(useCallback((msg: Message<ServerPayload>) => {
     switch (msg.type) {
       case 'STATUS_UPDATE': {
         setServerStatus((msg.payload as StatusUpdatePayload).state);
+        break;
+      }
+      case 'RESPONSE_AUDIO': {
+        const payload = msg.payload as { data: string };
+        if (payload.data) playAudio(payload.data);
         break;
       }
       case 'RESPONSE_TEXT': {
@@ -191,8 +205,35 @@ export default function App() {
             isNetworkUnavailable={false}
           />
         </div>
-        <div className="flex-[3] min-w-[280px] max-w-[400px] overflow-hidden">
-          <ConversationPanel messages={conversationMessages} />
+        <div className="flex-[3] min-w-[280px] max-w-[400px] min-h-0 overflow-hidden flex flex-col">
+          {/* Tab 切换 */}
+          <div className="flex-shrink-0 flex border-b border-white/[0.04]">
+            <button
+              onClick={() => setRightTab('chat')}
+              className={`flex-1 py-2.5 text-[10px] font-medium tracking-wider uppercase transition-colors ${
+                rightTab === 'chat'
+                  ? 'text-blue-400/80 border-b border-blue-400/40 bg-blue-400/[0.02]'
+                  : 'text-gray-600 hover:text-gray-400'
+              }`}
+            >
+              对话
+            </button>
+            <button
+              onClick={() => setRightTab('knowledge')}
+              className={`flex-1 py-2.5 text-[10px] font-medium tracking-wider uppercase transition-colors ${
+                rightTab === 'knowledge'
+                  ? 'text-emerald-400/80 border-b border-emerald-400/40 bg-emerald-400/[0.02]'
+                  : 'text-gray-600 hover:text-gray-400'
+              }`}
+            >
+              知识库
+            </button>
+          </div>
+          {rightTab === 'chat' ? (
+            <ConversationPanel messages={conversationMessages} />
+          ) : (
+            <KnowledgePanel />
+          )}
         </div>
       </div>
 

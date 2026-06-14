@@ -204,7 +204,7 @@ public class KnowledgeBase {
 
     // ==================== 关键词索引 ====================
 
-    void rebuildKeywordIndex() {
+    public void rebuildKeywordIndex() {
         keywordIndex.clear();
         List<KnowledgeDoc> all = mongoTemplate.findAll(KnowledgeDoc.class);
         for (KnowledgeDoc doc : all) {

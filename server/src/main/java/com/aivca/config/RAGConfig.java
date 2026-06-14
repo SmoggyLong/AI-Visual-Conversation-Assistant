@@ -1,7 +1,10 @@
 package com.aivca.config;
 
+import com.aivca.api.tts.TtsService;
+import com.aivca.api.tts.ZhipuTtsService;
 import com.aivca.rag.LlmTextCleaner;
 import com.aivca.rag.SpeechCorrector;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -10,6 +13,7 @@ import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -21,6 +25,8 @@ import java.time.Duration;
 @Slf4j
 @Configuration
 public class RAGConfig {
+
+    @Value("${ZHIPU_API_KEY}") String zhipuKey;
 
     @Bean
     EmbeddingModel embeddingModel() {
@@ -48,5 +54,11 @@ public class RAGConfig {
     SpeechCorrector speechCorrector(@Qualifier("zhipuFlashModel") ChatLanguageModel flashModel) {
         log.info("[RAG] 初始化 SpeechCorrector | model=glm-4-flash");
         return new SpeechCorrector(flashModel);
+    }
+
+    @Bean
+    TtsService ttsService(ObjectMapper objectMapper) {
+        log.info("[RAG] 初始化 ZhipuTtsService | model=tts-1");
+        return new ZhipuTtsService(zhipuKey, objectMapper);
     }
 }

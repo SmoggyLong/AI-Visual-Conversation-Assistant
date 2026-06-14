@@ -215,3 +215,38 @@ export interface ConversationMessage {
   /** 消息时间戳（毫秒） */
   timestamp: number;
 }
+
+// ============================================================
+// 知识库文档类型
+// ============================================================
+
+export interface KnowledgeDoc {
+  docId: string;
+  title: string;
+  type: 'SOP' | 'GENERAL';
+  sourceFile: string;
+  keywords: string[];
+  totalChunks: number;
+  createdAt?: string;
+}
+
+export interface KnowledgeStats {
+  totalDocs: number;
+  totalChunks: number;
+  sopCount: number;
+  generalCount: number;
+}
+
+export interface KnowledgeReloadResult {
+  status: string;
+  files: number;
+  newDocs: number;
+  newChunks: number;
+}
+
+export interface DocInput {
+  title: string;
+  content: string;
+  type: 'SOP' | 'GENERAL';
+  keywords: string;
+}
