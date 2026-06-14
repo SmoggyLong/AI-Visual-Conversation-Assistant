@@ -33,6 +33,17 @@ public class Orchestrator {
         VisionStructurer vision = VisionStructurer.parse(rawVision);
         String context = ContextBuilder.build(cleanSpeech, vision);
 
+        // 注入对话状态：上一轮的 Agent 类型帮助意图识别 (如游戏接龙中)
+        String state;
+        var history = session.getHistory();
+        if (!history.isEmpty()) {
+            var lastTurn = history.get(history.size() - 1);
+            if ("game".equals(lastTurn.getAgentType())) {
+                state = "\n[对话状态]\n当前正在进行成语接龙游戏，用户的输入很可能是成语接龙内容。\n";
+                context = (context != null ? context : "") + state;
+            }
+        }
+
         IntentResult result = intentRecognizer.recognize(context);
         log.info("[ORCH] 意图识别完成 | intent={} | urgency={} | confidence={}",
                 result.getIntent().toValue(),
