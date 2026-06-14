@@ -1,9 +1,17 @@
 server:
   port: 8080
+  tomcat:
+    max-http-form-post-size: 10MB
 
 spring:
   application:
     name: ai-visual-conversation
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
 
 logging:
   level:

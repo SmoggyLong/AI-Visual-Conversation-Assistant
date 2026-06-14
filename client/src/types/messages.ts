@@ -61,11 +61,21 @@ export interface MicrophoneControlPayload {
 
 export interface FrameDataPayload {
   format: 'jpeg';
-  width: number;
-  height: number;
-  data: string;          // base64
-  changed: boolean;      // 帧差检测：画面是否变化
-  imageChecksum: string; // 图片哈希，用于缓存去重
+  width?: number;
+  height?: number;
+  data?: string;
+  changed: boolean;
+  isSpeaking?: boolean;     // 是否在说话期间截取
+  imageChecksum?: string;
+  frames?: FrameItem[];
+}
+
+/** 批次中的单帧 */
+export interface FrameItem {
+  data: string;
+  format: 'jpeg';
+  checksum: string;
+  offsetMs: number;        // 相对当前时刻的偏移（-1000 = 1秒前）
 }
 
 export interface AudioDataPayload {

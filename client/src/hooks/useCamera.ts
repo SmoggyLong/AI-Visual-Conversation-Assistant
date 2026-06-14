@@ -1,8 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { CameraState, CameraControlPayload } from '../types/messages';
 
 interface UseCameraOptions {
-  /** 摄像头状态变更回调，用于通知服务端 */
   onStateChange?: (payload: CameraControlPayload) => void;
 }
 
@@ -10,22 +9,13 @@ interface UseCameraOptions {
  * 摄像头管理 Hook。
  *
  * 负责：
- * - 调用 getUserMedia 申请摄像头权限
- * - 管理 MediaStream 生命周期（获取/释放）
- * - 提供 videoRef 用于绑定 <video> 元素渲染预览
- * - 通过 onStateChange 回调通知服务端摄像头状态变更
- *
- * 权限被拒绝或设备不存在时，通过 state.error 返回中文错误提示。
- *
- * @param options.onStateChange — 摄像头开关状态变更时回调，发送 CAMERA_CONTROL 消息到服务端
- * @returns state     — 摄像头状态（enabled, stream, error, resolution）
- * @returns videoRef  — 绑定到 <video> 元素的 ref
- * @returns start     — 开启摄像头（可传入 deviceId 指定设备）
- * @returns stop      — 关闭摄像头，释放 MediaStream
- * @returns toggle    — 切换开关（开→关，关→开）
+ * - 枚举可用摄像头设备列表
+ * - 调用 getUserMedia 申请权限
+ * - 管理 MediaStream 生命周期
+ * - 切换摄像头设备
+ * - 通过 onStateChange 回调通知服务端状态变更
  */
 export function useCamera(options?: UseCameraOptions) {
-  /** 摄像头状态 */
   const [state, setState] = useState<CameraState>({
     enabled: false,
     deviceId: null,
@@ -34,28 +24,56 @@ export function useCamera(options?: UseCameraOptions) {
     error: null,
   });
 
-  /** video 元素引用，用于绑定 MediaStream 渲染预览 */
+  /** 可用摄像头设备列表 */
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+
   const videoRef = useRef<HTMLVideoElement>(null);
+  const currentDeviceIdRef = useRef<string | null>(null);
+
+  /**
+   * 枚举所有视频输入设备。
+   * 组件挂载时执行一次，监听设备插拔事件。
+   */
+  const enumerate = useCallback(async () => {
+    try {
+      // 先请求一次权限（否则 device.label 为空）
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const cameras = all.filter((d) => d.kind === 'videoinput');
+      setDevices(cameras);
+    } catch {
+      // 枚举失败，保持旧列表
+    }
+  }, []);
+
+  useEffect(() => {
+    enumerate();
+    navigator.mediaDevices.addEventListener('devicechange', enumerate);
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', enumerate);
+    };
+  }, [enumerate]);
 
   /**
    * 开启摄像头。
-   * 优先使用 1280x720 分辨率，失败时使用默认分辨率。
-   *
-   * @param deviceId 可选，指定摄像头设备 ID
+   * @param deviceId 可选，指定设备 ID；不传则使用当前选中的设备或默认设备
    */
   const start = useCallback(async (deviceId?: string) => {
+    const targetId = deviceId ?? currentDeviceIdRef.current;
     try {
       const constraints: MediaStreamConstraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId }, width: 1280, height: 720 }
-          : { width: 1280, height: 720, facingMode: 'user' },
+        video: {
+          deviceId: targetId ? { exact: targetId } : undefined,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       };
 
-      // MediaStream → 绑定 video 元素 + 记录状态
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       const track = stream.getVideoTracks()[0];
       const settings = track.getSettings();
+
+      currentDeviceIdRef.current = settings.deviceId ?? null;
 
       setState({
         enabled: true,
@@ -65,13 +83,13 @@ export function useCamera(options?: UseCameraOptions) {
         error: null,
       });
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      // stream 绑定由 useEffect 处理（等待 video 元素渲染后绑定）
 
-      options?.onStateChange?.({ enabled: true, deviceId });
+      options?.onStateChange?.({ enabled: true, deviceId: settings.deviceId ?? undefined });
+
+      // 刷新设备列表（拿到 label）
+      enumerate();
     } catch (err) {
-      // 错误分类 → 中文提示
       const message =
         err instanceof DOMException
           ? err.name === 'NotAllowedError'
@@ -82,17 +100,12 @@ export function useCamera(options?: UseCameraOptions) {
           : '摄像头启动失败';
       setState((prev) => ({ ...prev, enabled: false, error: message }));
     }
-  }, [options]);
+  }, [options, enumerate]);
 
-  /**
-   * 关闭摄像头，停止所有 track 并清除 video 绑定。
-   */
+  /** 关闭摄像头 */
   const stop = useCallback(() => {
     if (state.stream) {
       state.stream.getTracks().forEach((track) => track.stop());
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
     }
     setState({
       enabled: false,
@@ -104,9 +117,14 @@ export function useCamera(options?: UseCameraOptions) {
     options?.onStateChange?.({ enabled: false });
   }, [state.stream, options]);
 
-  /**
-   * 切换摄像头开关。
-   */
+  /** stream 变化时绑定到 video 元素（等待 React 渲染完成后执行） */
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.srcObject = state.stream ?? null;
+    }
+  }, [state.stream]);
+
+  /** 切换开关 */
   const toggle = useCallback(async () => {
     if (state.enabled) {
       stop();
@@ -115,5 +133,15 @@ export function useCamera(options?: UseCameraOptions) {
     }
   }, [state.enabled, start, stop]);
 
-  return { state, videoRef, start, stop, toggle };
+  /** 切换到指定设备（如果已开启则重启） */
+  const switchDevice = useCallback(async (deviceId: string) => {
+    if (state.enabled) {
+      stop();
+      await start(deviceId);
+    } else {
+      currentDeviceIdRef.current = deviceId;
+    }
+  }, [state.enabled, start, stop]);
+
+  return { state, devices, videoRef, start, stop, toggle, switchDevice, refreshDevices: enumerate };
 }
