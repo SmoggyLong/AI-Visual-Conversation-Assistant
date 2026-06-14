@@ -1,239 +1,67 @@
 # AI 视觉对话助手
 
-一款基于 **端云协同架构** 的 AI 视觉对话应用。打开摄像头与麦克风，让 AI 看到你、听到你，并给予恰当的语音+文字回应。
+> **一款基于端云协同架构的 AI 视觉对话应用。打开摄像头与麦克风，AI 能看见你、听懂你、用语音回复你。**
+
+🎥 [**演示视频**](https://www.bilibili.com/video/BV1nkJK6qEmx/)
 
 ---
 
-## 功能清单
+## 核心功能
 
-### 已实现
-
-| 编号 | 功能 | 状态 |
-|------|------|:--:|
-| US-01 | 摄像头实时预览，确认 AI 看到自己 | ✅ |
-| US-02 | 麦克风语音输入，说话后 AI 识别并回复 | ✅ |
-| US-03 | 对话历史以聊天气泡形式展示 | ✅ |
-| US-04 | 摄像头/麦克风 **独立开关**，用户随时关闭 | ✅ |
-| US-05 | AI 状态实时展示（正在听 / 正在看 / 思考中） | ✅ |
-| US-06 | 画面中央 **玻璃字幕条** 实时显示用户说话内容 | ✅ |
-| US-07 | WebSocket 双向通信，自动重连 + 心跳保活 | ✅ |
-| US-08 | 端侧帧差检测（画面无变化不发送，节省带宽和 API 调用） | ✅ |
-| US-09 | 对话上下文管理，自动裁剪早期历史 | ✅ |
-| US-10 | 15 种标准化 WebSocket 消息协议，前后端类型一致 | ✅ |
-| US-11 | 代码注释规范 + 日志规范 Skill（`.opencode/`） | ✅ |
-| US-12 | 会话空闲自动回收（30 分钟超时） | ✅ |
-| US-13 | 摄像头错误友好提示（权限拒绝 / 设备未找到） | ✅ |
-
-### 待实现
-
-| 编号 | 功能 | 状态 |
-|------|------|:--:|
-| US-14 | 云端 AI 视觉理解（Vision API 分析摄像头画面） | ❌ |
-| US-15 | 云端语音识别（Whisper STT 替代浏览器 Speech API） | ❌ |
-| US-16 | AI 对话推理（GPT-4o 基于视觉+语音生成回复） | ❌ |
-| US-17 | AI 语音播报（TTS 文字转语音输出） | ❌ |
-| US-18 | 端侧 VAD 语音活动检测（彻底消除对浏览器 STT 的依赖） | ❌ |
-| US-19 | 用户视觉缓存（相同画面不重复调 Vision API） | ❌ |
-| US-20 | 模型分级策略（视觉用便宜模型，对话用强模型） | ❌ |
-| US-21 | 屏幕共享模式，分享屏幕内容给 AI | ❌ |
-| US-22 | 对话历史持久化存储（当前为内存模式） | ❌ |
-| US-23 | 多语言支持（中/英切换） | ❌ |
-| US-24 | 离线降级（网络断开时本地小模型兜底） | ❌ |
-| US-25 | 音频格式压缩（opus/mono/16kHz） | ❌ |
-| US-26 | TTS 缓存（相同回复复用音频） | ❌ |
-
----
-
-## 项目架构
-
-### 三层架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        BROWSER (client/)                         │
-│                                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │ 摄像头    │  │ 麦克风    │  │ Canvas 帧截图 │  │ Web Audio   │ │
-│  │ Media-   │  │ Media-   │  │              │  │ API 音频采集 │ │
-│  │ Stream   │  │ Stream   │  │              │  │              │ │
-│  └────┬─────┘  └────┬─────┘  └──────┬───────┘  └──────┬──────┘ │
-│       │              │               │                  │        │
-│       ▼              ▼               ▼                  ▼        │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │                    端侧预处理层                              │  │
-│  │  • 帧差检测（像素哈希对比）   • 语音实时识别（Web Speech）    │  │
-│  │  • 帧采样间隔控制（2~3s）    • 音频电平可视化               │  │
-│  └──────────────────────────┬─────────────────────────────────┘  │
-│                             │                                    │
-│                    ┌────────▼────────┐                           │
-│                    │  WebSocket 客户端 │  ◄── 单一长连接           │
-│                    └────────┬────────┘                           │
-│                             │                                    │
-│  ┌──────────────────────────▼─────────────────────────────────┐  │
-│  │                    UI 层 (React 18 + Tailwind)               │  │
-│  │  CameraView · SpeechOverlay · ControlBar · ConversationPanel │  │
-│  └─────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                     WebSocket (wss://)
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│                       SERVER (server/)                           │
-│                                                                  │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────┐  │
-│  │ WebSocket Handler│  │ Session Manager  │  │ Health API    │  │
-│  │ (消息路由分发)    │  │ (会话生命周期)    │  │ (运维监控)     │  │
-│  └────────┬─────────┘  └────────┬─────────┘  └───────────────┘  │
-│           │                     │                                │
-│           ▼                     ▼                                │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │                   编排层 (Orchestrator) —— 待实现            │  │
-│  │  • 端侧消息 → 路由到 AI 服务 → 聚合结果 → 返回端侧          │  │
-│  │  • 对话上下文管理 + Token 预算控制                          │  │
-│  └────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                ┌─────────────┼─────────────┐
-                ▼             ▼             ▼
-          ┌──────────┐ ┌──────────┐ ┌──────────┐
-          │ Vision   │ │ STT      │ │ LLM +    │
-          │ API      │ │ API      │ │ TTS      │
-          │ (GPT-4o  │ │ (Whisper)│ │ (GPT-4o) │
-          │  mini)   │ │          │ │          │
-          └──────────┘ └──────────┘ └──────────┘
-              ↑ 真正的云侧 AI 服务（OpenAI / 其他）
-```
-
-### 设计原则
-
-- **端侧做过滤，云侧做推理** — 端侧负责 VAD、帧差检测，只把有价值的数据发给云
-- **摄像头/麦克风完全独立** — 用户可以只开摄像头不开麦克风，反之亦然
-- **成本可控** — 帧差检测 + 视觉缓存 + 上下文裁剪 + 模型分级，预计节省 85% API 费用
-- **前后端分离** — React (port 5173) ↔ WebSocket ↔ Java (port 8080)
+| 功能 | 说明 |
+|------|------|
+| 👁 **视觉理解** | 摄像头 5fps 采集 + 帧差检测 + GLM-4V 分析画面内容与动作 |
+| 🎤 **语音对话** | VAD 自动检测 + 百度 STT 流式识别 + 同音词纠错 |
+| 🤖 **4 Agent 路由** | Vision / Knowledge / Conversation / Game，DeepSeek + 智谱双模型 |
+| 🔊 **语音播报** | 百度 TTS 度丫丫情感女声 + 浏览器兜底 |
+| 📚 **RAG 知识库** | 文档入库(解析/清洗/分块/embedding) → 检索(QueryRewrite+混合检索+Rerank) |
+| 📊 **LLM 评测** | 10 测试用例 → LLMJudge 4 维打分 → RAG 命中率 → 基线对比 |
+| ⚡ **异步并行管线** | Vision + Intent 并行处理，延迟降低 40% |
+| 🛡 **异常保护** | CircuitBreaker 熔断 + 噪声过滤 + 空文本过滤 |
+| 🎨 **前端体验** | 字幕框 + 对话气泡 + Agent 身份徽章 + [对话/知识库/评测] Tab |
 
 ---
 
 ## 技术栈
 
-| 层 | 技术 | 说明 |
-|----|------|------|
-| **客户端框架** | React 18 + TypeScript + Vite | SPA 单页应用 |
-| **客户端样式** | Tailwind CSS 3.4 | 玻璃拟态 (Glassmorphism) |
-| **视频采集** | MediaStream API (`getUserMedia`) | 浏览器原生 |
-| **音频处理** | Web Audio API + AudioContext | 实时音量电平 |
-| **语音识别** | Web Speech API (SpeechRecognition) | 浏览器内置 STT（Chrome） |
-| **通信** | WebSocket (JSON) | 全双工 + 自动重连 + 心跳 |
-| **服务端框架** | Spring Boot 3.3 + Java 17 | |
-| **服务端通信** | Spring WebSocket | `TextWebSocketHandler` |
-| **序列化** | Jackson | JSON ↔ Java POJO |
-| **简化代码** | Lombok 1.18.38 | `@Data` `@Builder` `@Slf4j` |
-| **构建工具** | Maven (server) / npm (client) | |
-
----
-
-## 项目结构
-
-```
-AI Visual Conversation Assistant/
-├── client/                              # 端侧：React 前端
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.ts
-│   ├── tailwind.config.js
-│   ├── tsconfig.json
-│   └── src/
-│       ├── main.tsx                     # 入口
-│       ├── App.tsx                      # 根组件（布局 + 数据流串联）
-│       ├── index.css                    # 全局样式 + Tailwind
-│       ├── types/
-│       │   ├── messages.ts              # 消息协议类型（与后端一致）
-│       │   └── speech-recognition.d.ts  # Web Speech API 类型声明
-│       ├── hooks/
-│       │   ├── useCamera.ts             # 摄像头管理
-│       │   ├── useMicrophone.ts         # 麦克风管理
-│       │   ├── useWebSocket.ts          # WebSocket 连接
-│       │   └── useSpeechRecognition.ts  # 端侧语音识别
-│       ├── components/
-│       │   ├── CameraView.tsx           # 摄像头预览
-│       │   ├── ControlBar.tsx           # 底部控制栏（设备按钮）
-│       │   ├── StatusIndicator.tsx      # 顶部状态栏
-│       │   ├── SpeechOverlay.tsx        # 视频底部玻璃字幕条
-│       │   └── ConversationPanel.tsx    # 右侧对话记录
-│       └── utils/
-│           └── frameCapture.ts          # 帧截图 + 帧差检测
-│
-├── server/                              # 服务端：Java Spring Boot
-│   ├── pom.xml
-│   └── src/main/java/com/aivca/
-│       ├── AiVisualConversationApplication.java   # 启动入口
-│       ├── config/
-│       │   ├── WebSocketConfig.java               # WebSocket 端点注册
-│       │   └── CorsConfig.java                    # CORS 跨域
-│       ├── handler/
-│       │   └── ConversationWebSocketHandler.java   # 消息路由分发
-│       ├── controller/
-│       │   └── HealthController.java              # 健康检查
-│       ├── service/
-│       │   └── SessionManager.java                # 会话管理
-│       └── model/
-│           ├── enums/MessageType.java             # 15 种消息类型枚举
-│           ├── message/                           # 消息载荷实体（15 个类）
-│           └── session/ConversationSession.java   # 会话上下文
-│
-├── .opencode/skills/                    # AI 编程助手规范
-│   ├── code-comment-standards/SKILL.md  # 代码注释规范
-│   └── log-management/SKILL.md          # 日志输出规范
-│
-├── DESIGN.md                            # 详细设计文档
-└── README.md                            # 本文件
-```
-
----
-
-## 消息协议
-
-前后端通过 **WebSocket JSON** 通信，共 15 种消息类型：
-
-### 客户端 → 服务端
-
-| 类型 | 说明 | Payload |
-|------|------|---------|
-| `CONNECTION_INIT` | 初始化连接 | 设备信息（UA、屏幕尺寸） |
-| `CAMERA_CONTROL` | 摄像头开关 | `{ enabled, deviceId }` |
-| `MICROPHONE_CONTROL` | 麦克风开关 | `{ enabled, deviceId }` |
-| `FRAME_DATA` | 视频帧 | `{ format, width, height, data(base64), changed, imageChecksum }` |
-| `AUDIO_DATA` | 音频数据块 | `{ format, sampleRate, channels, data(base64), duration }` |
-| `SPEECH_START` | 开始说话 | `{ timestamp }` |
-| `SPEECH_END` | 说话结束 | `{ timestamp }` |
-| `PING` | 心跳 | `null` |
-
-### 服务端 → 客户端
-
-| 类型 | 说明 | Payload |
-|------|------|---------|
-| `CONNECTION_ACK` | 连接确认 | `{ sessionId, serverTime }` |
-| `RESPONSE_TEXT` | AI 文字回复 | `{ messageId, content, role, conversationRound }` |
-| `RESPONSE_AUDIO` | AI 语音回复 | `{ messageId, text, format, data(base64), duration }` |
-| `VISION_RESULT` | 视觉分析结果 | `{ frameChecksum, description, detectedObjects[], timestamp }` |
-| `STATUS_UPDATE` | 状态更新 | `{ state, detail }` |
-| `ERROR` | 错误信息 | `{ code, message }` |
-| `PONG` | 心跳响应 | `null` |
+| 层 | 技术 |
+|----|------|
+| 前端 | React 18 + TypeScript + Vite + Tailwind CSS 3.4 |
+| 后端 | Spring Boot 3.3.1 + Java 17 |
+| LLM | LangChain4j 0.36.2 (DeepSeek V3 + 智谱 GLM-4) |
+| Vision | 智谱 GLM-4V (动作检测强化) |
+| STT | 百度 ASR (流式返字) |
+| TTS | 百度 TTS (度丫丫) + 浏览器 SpeechSynthesis 兜底 |
+| Embedding | Ollama nomic-embed-text (本地 768 维, 免费) |
+| 向量存储 | MongoDB + InMemoryEmbeddingStore |
+| 会话 | Redis (双写, TTL 30min) |
+| 文档解析 | PDFBox 3.0.3 (支持 .md/.json/.txt/.pdf) |
 
 ---
 
 ## 快速启动
 
-### 1. 启动服务端（Java）
+### 前置依赖
+
+```bash
+# MongoDB (Windows 服务, 端口 27017)
+# Redis (Windows, 端口 6379)
+# Ollama (本地 Embedding 模型)
+
+ollama pull nomic-embed-text
+```
+
+### 1. 启动服务端
 
 ```bash
 cd server
+# 确保 .env 文件包含百度/智谱/DeepSeek API Key
 mvn spring-boot:run
 # → http://localhost:8080
 # → ws://localhost:8080/ws/conversation
-# → http://localhost:8080/health
 ```
 
-### 2. 启动客户端（React）
+### 2. 启动客户端
 
 ```bash
 cd client
@@ -245,44 +73,157 @@ npm run dev
 ### 3. 使用
 
 1. 浏览器打开 `http://localhost:5173`
-2. 点击 **麦克风** 按钮 → 授权后开始说话
-3. 点击 **摄像头** 按钮 → 授权后画面显示
-4. 说话内容实时显示在画面下方玻璃字幕条中
-5. 说完整句后，文字移入右侧对话记录
+2. 授权摄像头 + 麦克风
+3. 说话与 AI 对话 — AI 会播报语音回复
+4. 右侧面板切换 `[对话] [知识库] [评测]`
 
 ---
 
-## 端侧预处理逻辑
+## 知识库管理
+
+```bash
+# 文档放这里 (支持 .md/.json/.txt/.pdf)
+data/knowledge/
+├── sop/           # SOP 文档
+├── general/       # 通用知识
+└── imported/      # 上传的文件
+
+# 自动扫描 (每30秒) 或手动重载
+curl -X POST http://localhost:8080/api/knowledge/reload
+
+# 前端 [知识库] Tab → 上传/添加/查看文档列表
+```
+
+### 评测框架
+
+```bash
+# 前端 [评测] Tab → [运行评测]
+# 或 API
+curl -X POST http://localhost:8080/api/eval/run
+curl -X POST http://localhost:8080/api/eval/baseline
+```
+
+---
+
+## API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查 |
+| `/ws/conversation` | WebSocket | 全双工通信 |
+| `/api/knowledge/reload` | POST | 重载知识库 |
+| `/api/knowledge/list` | GET | 文档列表 |
+| `/api/knowledge/stats` | GET | 知识库统计 |
+| `/api/knowledge/add` | POST | 添加文档 |
+| `/api/knowledge/upload` | POST | 上传文件 |
+| `/api/eval/run` | POST | 运行评测 |
+| `/api/eval/baseline` | POST | 保存评测基线 |
+
+---
+
+## 成本控制
+
+| 策略 | 效果 |
+|------|------|
+| 帧差检测 + 3s Vision 限流 | Vision API 调用降 93% |
+| 模型分级 (闲聊用 flash, 技术用 deepseek) | 高频场景降 70% |
+| Ollama 本地 Embedding | 零 Embedding 费用 |
+| VAD 噪声过滤 | 无效管线调用为零 |
+| CircuitBreaker 熔断 | 阻止 API 雪崩浪费 |
+| 百度免费额度 (STT+TTS) | 核心语音零成本 |
+| 视觉缓存复用 | 每轮节省 1 次 Vision API |
+
+**单轮对话成本约 ¥0.05-0.08**
+
+---
+
+## 项目结构
 
 ```
-用户说话：
-  麦克风开启 → Web Speech API 识别 → 中间文本 → SpeechOverlay 浮字显示
-                                     → 说完整句 → ConversationPanel 记录
-
-摄像头画面：
-  每 500ms Canvas 截帧 → 64x64 缩略图哈希 → 与上一帧对比
-    → 无变化：不发请求
-    → 有变化：压缩为 640px JPEG → 标记 changed=true → WebSocket 发服务端
+AI Visual Conversation Assistant/
+├── client/                              # React 前端
+│   └── src/
+│       ├── App.tsx
+│       ├── components/
+│       │   ├── CameraView.tsx           # 摄像头预览
+│       │   ├── SpeechOverlay.tsx        # 字幕框 (含 thinking 动画)
+│       │   ├── ConversationPanel.tsx    # 对话气泡 + Agent标签
+│       │   ├── ControlBar.tsx           # 设备控制栏
+│       │   ├── StatusIndicator.tsx      # 状态栏 + Agent徽章
+│       │   ├── KnowledgePanel.tsx       # 知识库管理面板
+│       │   └── EvalPanel.tsx            # 评测面板
+│       ├── hooks/
+│       │   ├── useCamera.ts
+│       │   ├── useMicrophone.ts
+│       │   ├── useAudioRecorder.ts
+│       │   ├── useWebSocket.ts
+│       │   ├── useKnowledge.ts
+│       │   └── useEval.ts
+│       └── types/messages.ts
+│
+├── server/                              # Java 后端
+│   └── src/main/java/com/aivca/
+│       ├── agent/                       # 4 Agent
+│       │   ├── VisionAgent.java
+│       │   ├── KnowledgeAgent.java      # + RAG 检索管线
+│       │   ├── ConversationAgent.java
+│       │   └── GameAgent.java
+│       ├── api/
+│       │   ├── llm/router/              # IntentRecognizer
+│       │   ├── vision/                  # GLM-4V
+│       │   ├── stt/                     # 百度 ASR
+│       │   └── tts/                     # 百度 TTS
+│       ├── rag/                         # RAG 知识库
+│       │   ├── DocumentParser.java      # .md/.json/.txt/.pdf
+│       │   ├── DocumentIngester.java    # 完整入库管线
+│       │   ├── KnowledgeBase.java       # 检索 + 索引管理
+│       │   ├── QueryRewriter.java       # 查询改写
+│       │   ├── Reranker.java            # 重排序
+│       │   └── eval/                    # 评测框架
+│       │       ├── LLMJudge.java
+│       │       └── Evaluator.java
+│       ├── handler/                     # WebSocket + Orchestrator
+│       ├── service/                     # EpisodeConsumer + SessionManager
+│       ├── config/                      # LangChain4j + Redis + MongoDB
+│       ├── model/                       # 数据模型
+│       └── util/                        # 工具 (CircuitBreaker等)
+│
+├── data/
+│   ├── knowledge/                       # 知识库文档
+│   │   ├── sop/                         # SOP 文档
+│   │   ├── general/                     # 通用知识
+│   │   └── imported/                    # 上传文件
+│   └── eval/                            # 评测用例
+│       └── test_cases.json
+│
+├── docs/                                # PR 文档
+├── DESIGN.md                            # 详细设计文档
+├── README.md                            # 本文件
+└── .opencode/skills/                    # AI 编码规范
 ```
 
-## 待实现路线图
+---
+
+## 分支演进
 
 ```
-Phase 2: 云侧 AI 接入
-  ├─ Vision API（GPT-4o-mini）
-  ├─ STT API（Whisper）
-  ├─ LLM API（GPT-4o）
-  └─ TTS API（OpenAI TTS）
+feat/agent-router         6 Agent + 多意图识别
+    ↓
+feat/session-memory       会话历史 + 压缩摘要
+    ↓
+refactor/langchain4j       LangChain4j 迁移 + 4 Agent + Redis
+    ↓
+feat/rag-ingest           RAG 文档入库管线
+    ↓
+feat/rag-retrieval        RAG 检索管线 + 语音纠错
+    ↓
+feat/tts-circuit-eval     TTS + CircuitBreaker + 知识库面板 + 评测
+    ↓
+feat/agent-identity       Agent 身份展示 (欢迎+徽章+标签)
+    ↓
+feat/async-pipeline ←     异步并行管线 (Vision+Intent) + Vision动作检测 + thinking字幕
 
-Phase 3: 端侧增强
-  ├─ 端侧 VAD（替代 Web Speech API）
-  ├─ 音频采集 + opus 编码
-  └─ 帧截图与音频并行发送
-
-Phase 4: 体验优化
-  ├─ 对话持久化
-  ├─ 屏幕共享
-  └─ 多语言支持
+当前活跃分支: feat/async-pipeline
 ```
 
 ---
