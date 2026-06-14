@@ -50,6 +50,9 @@ public class ConversationSession {
     /** 是否已发送过欢迎消息 */
     private boolean welcomed;
 
+    /** 上次视觉自动回复时间（冷却 15 秒） */
+    private Instant lastVisionResponseAt;
+
     // ==================== 压缩策略常量 ====================
     static final int COMPRESS_AT = 8;
     static final int KEEP_RAW = 3;

@@ -120,7 +120,7 @@ public class EpisodeConsumer implements Runnable {
         }
     }
 
-    /** 静默画面 → 同步调 Vision → 更新 episode + session 缓存。不触发回复（只有语音说话才回复）。 */
+    /** 静默画面 → 调 Vision → 画面显著变化时自动回复（15s 冷却） */
     private void handleVision(TriggerEvent event) {
         if (!visionBreaker.allowRequest()) {
             log.debug("[EP] Vision 熔断中，跳过");
@@ -144,15 +144,30 @@ public class EpisodeConsumer implements Runnable {
         }
 
         ep.updateVision(vs.getDescription(), action);
+        session.setCachedVisionDescription(desc);
         log.info("[EP-{}] VISION | desc={} | action={}", ep.getId(),
                 truncate(vs.getDescription(), 60), truncate(action, 40));
 
-        session.setCachedVisionDescription(desc);
-        // VISION 只积累画面，不自动回复。回复仅在 SPEECH_BATCH 时触发。
+        // 画面显著变化 → 自动回复（15秒冷却，语音说话时自动清队列打断）
+        if (ep.shouldClose()) {
+            var lastAt = session.getLastVisionResponseAt();
+            if (lastAt == null || java.time.Duration.between(lastAt, java.time.Instant.now()).getSeconds() >= 15) {
+                ep.setClosed(true);
+                ep.setCloseTime(java.time.Instant.now());
+                session.setLastVisionResponseAt(java.time.Instant.now());
+                log.info("[EP-{}] ═══ EPISODE 关闭 ═══ | reason={}", ep.getId(), ep.getCloseReason());
+                respond(ep, java.util.concurrent.CompletableFuture.completedFuture(null));
+            } else {
+                log.debug("[EP-{}] Vision 冷却中，跳过回复", ep.getId());
+            }
+        }
     }
 
     /** 语音+累积帧 → Vision(异步) + Intent(并行) → Agent → 回复 */
     private void handleSpeechBatch(TriggerEvent event) {
+        // 用户说话 → 重置视觉冷却，语音始终优先
+        session.setLastVisionResponseAt(null);
+
         Episode ep = session.getCurrentEpisode();
         if (ep == null || ep.isClosed()) {
             ep = new Episode();
