@@ -1,31 +1,16 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { CameraState, CameraControlPayload } from '../types/messages';
 
 interface UseCameraOptions {
-  /** 摄像头状态变更回调，用于通知服务端 */
   onStateChange?: (payload: CameraControlPayload) => void;
 }
 
 /**
  * 摄像头管理 Hook。
  *
- * 负责：
- * - 调用 getUserMedia 申请摄像头权限
- * - 管理 MediaStream 生命周期（获取/释放）
- * - 提供 videoRef 用于绑定 <video> 元素渲染预览
- * - 通过 onStateChange 回调通知服务端摄像头状态变更
- *
- * 权限被拒绝或设备不存在时，通过 state.error 返回中文错误提示。
- *
- * @param options.onStateChange — 摄像头开关状态变更时回调，发送 CAMERA_CONTROL 消息到服务端
- * @returns state     — 摄像头状态（enabled, stream, error, resolution）
- * @returns videoRef  — 绑定到 <video> 元素的 ref
- * @returns start     — 开启摄像头（可传入 deviceId 指定设备）
- * @returns stop      — 关闭摄像头，释放 MediaStream
- * @returns toggle    — 切换开关（开→关，关→开）
+ * v2: 原子切换（不发中间 false）+ generation counter 防竞态。
  */
 export function useCamera(options?: UseCameraOptions) {
-  /** 摄像头状态 */
   const [state, setState] = useState<CameraState>({
     enabled: false,
     deviceId: null,
@@ -34,28 +19,52 @@ export function useCamera(options?: UseCameraOptions) {
     error: null,
   });
 
-  /** video 元素引用，用于绑定 MediaStream 渲染预览 */
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
 
-  /**
-   * 开启摄像头。
-   * 优先使用 1280x720 分辨率，失败时使用默认分辨率。
-   *
-   * @param deviceId 可选，指定摄像头设备 ID
-   */
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const currentDeviceIdRef = useRef<string | null>(null);
+  const genRef = useRef(0);       // generation counter，取消过期请求
+
+  const enumerate = useCallback(async () => {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const cameras = all.filter((d) => d.kind === 'videoinput');
+      setDevices(cameras);
+    } catch { /* 忽略 */ }
+  }, []);
+
+  useEffect(() => {
+    enumerate();
+    navigator.mediaDevices.addEventListener('devicechange', enumerate);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', enumerate);
+  }, [enumerate]);
+
   const start = useCallback(async (deviceId?: string) => {
+    const targetId = deviceId ?? currentDeviceIdRef.current;
+    const myGen = ++genRef.current;
+
     try {
       const constraints: MediaStreamConstraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId }, width: 1280, height: 720 }
-          : { width: 1280, height: 720, facingMode: 'user' },
+        video: {
+          deviceId: targetId ? { exact: targetId } : undefined,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       };
 
-      // MediaStream → 绑定 video 元素 + 记录状态
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // 有更新的 start() 进来了，丢弃本次结果
+      if (myGen !== genRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
       const track = stream.getVideoTracks()[0];
       const settings = track.getSettings();
+
+      currentDeviceIdRef.current = settings.deviceId ?? null;
 
       setState({
         enabled: true,
@@ -65,13 +74,9 @@ export function useCamera(options?: UseCameraOptions) {
         error: null,
       });
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-
-      options?.onStateChange?.({ enabled: true, deviceId });
+      options?.onStateChange?.({ enabled: true, deviceId: settings.deviceId ?? undefined });
+      enumerate();
     } catch (err) {
-      // 错误分类 → 中文提示
       const message =
         err instanceof DOMException
           ? err.name === 'NotAllowedError'
@@ -81,18 +86,14 @@ export function useCamera(options?: UseCameraOptions) {
             : err.message
           : '摄像头启动失败';
       setState((prev) => ({ ...prev, enabled: false, error: message }));
+      // 通知后端关闭（不管是首次开还是切换，失败时都要让后端知道不可用）
+      options?.onStateChange?.({ enabled: false });
     }
-  }, [options]);
+  }, [options, enumerate]);
 
-  /**
-   * 关闭摄像头，停止所有 track 并清除 video 绑定。
-   */
   const stop = useCallback(() => {
     if (state.stream) {
       state.stream.getTracks().forEach((track) => track.stop());
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
     }
     setState({
       enabled: false,
@@ -104,9 +105,13 @@ export function useCamera(options?: UseCameraOptions) {
     options?.onStateChange?.({ enabled: false });
   }, [state.stream, options]);
 
-  /**
-   * 切换摄像头开关。
-   */
+  /** stream 变化时绑定到 video 元素 */
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.srcObject = state.stream ?? null;
+    }
+  }, [state.stream]);
+
   const toggle = useCallback(async () => {
     if (state.enabled) {
       stop();
@@ -115,5 +120,92 @@ export function useCamera(options?: UseCameraOptions) {
     }
   }, [state.enabled, start, stop]);
 
-  return { state, videoRef, start, stop, toggle };
+  /**
+   * 切换设备：先停旧流释放硬件 → 开新设备。
+   * 失败时尝试回退到默认设备。
+   */
+  const switchDevice = useCallback(async (deviceId: string) => {
+    if (!state.enabled) {
+      currentDeviceIdRef.current = deviceId;
+      return;
+    }
+
+    // 1. 先停旧流，释放硬件
+    const oldStream = state.stream;
+    oldStream?.getTracks().forEach((t) => t.stop());
+    setState((prev) => ({ ...prev, stream: null }));
+
+    // 2. 尝试打开新设备
+    const myGen = ++genRef.current;
+    try {
+      const constraints: MediaStreamConstraints = {
+        video: {
+          deviceId: { exact: deviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      if (myGen !== genRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings();
+      currentDeviceIdRef.current = settings.deviceId ?? null;
+
+      setState({
+        enabled: true,
+        deviceId: settings.deviceId ?? null,
+        resolution: `${settings.width}x${settings.height}`,
+        stream,
+        error: null,
+      });
+
+      options?.onStateChange?.({ enabled: true, deviceId: settings.deviceId ?? undefined });
+      enumerate();
+    } catch {
+      // 3. 失败 → 尝试回退到默认设备
+      try {
+        const fallback: MediaStreamConstraints = {
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(fallback);
+
+        if (myGen !== genRef.current) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings();
+        currentDeviceIdRef.current = settings.deviceId ?? null;
+
+        setState({
+          enabled: true,
+          deviceId: settings.deviceId ?? null,
+          resolution: `${settings.width}x${settings.height}`,
+          stream,
+          error: null,
+        });
+
+        options?.onStateChange?.({ enabled: true, deviceId: settings.deviceId ?? undefined });
+        enumerate();
+      } catch {
+        setState((prev) => ({
+          ...prev,
+          enabled: false,
+          stream: null,
+          error: '摄像头切换失败',
+        }));
+        options?.onStateChange?.({ enabled: false });
+      }
+    }
+  }, [state.enabled, state.stream, options, enumerate]);
+
+  return { state, devices, videoRef, start, stop, toggle, switchDevice, refreshDevices: enumerate };
 }

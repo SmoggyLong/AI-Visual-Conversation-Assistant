@@ -1,0 +1,36 @@
+Java 基础速查
+
+=== 常用集合框架 ===
+- List: ArrayList (查询快)、LinkedList (插入快)
+- Set: HashSet (无序去重)、TreeSet (有序)、LinkedHashSet (插入序)
+- Map: HashMap (键值对)、TreeMap (有序键)、LinkedHashMap (插入序)
+- Queue: LinkedList、PriorityQueue、ArrayDeque
+
+=== Stream API 常用操作 ===
+- filter: 过滤元素
+- map: 转换元素
+- flatMap: 扁平化
+- distinct: 去重
+- sorted: 排序
+- collect: 收集 (Collectors.toList/toSet/toMap)
+- reduce: 聚合
+- groupingBy: 分组
+
+=== Optional 用法 ===
+Optional.ofNullable(value)
+    .map(...)
+    .orElse(defaultValue);
+// 或 orElseThrow(() -> new XxxException("msg"))
+
+=== 线程安全集合 ===
+- ConcurrentHashMap: 高并发 Map
+- CopyOnWriteArrayList: 读写分离 List
+- Collections.synchronizedList/Map/Set: 包装同步
+- BlockingQueue: 生产者消费者队列
+
+=== 常见设计模式 ===
+- 单例: 全局唯一实例
+- 工厂: 延迟对象创建
+- 策略: 运行时切换算法
+- 观察者: 事件通知
+- 模板方法: 定义骨架、子类实现细节
