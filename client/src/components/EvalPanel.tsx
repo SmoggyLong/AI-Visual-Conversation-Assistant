@@ -65,7 +65,9 @@ export function EvalPanel() {
             </div>
 
             {/* 各Agent详情 */}
-            {report.byAgent && Object.entries(report.byAgent).map(([agent, summary]) => (
+            {report.byAgent && Object.entries(report.byAgent).map(([agent, summary]) => {
+              const cases = report.details?.[agent] || [];
+              return (
               <details key={agent} className="group">
                 <summary className="px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.03] cursor-pointer text-[11px] text-white/70 hover:text-white/90">
                   <span className="font-medium">{agent}</span>
@@ -73,8 +75,39 @@ export function EvalPanel() {
                     {summary.passedChecks}/{summary.cases} · 综合 {summary.avgScores?.overall ?? '-'}
                   </span>
                 </summary>
-                <div className="mt-1 space-y-1">
-                  <div className="px-3 py-1.5 grid grid-cols-4 gap-2 text-[9px]">
+
+                {/* 每例详情 */}
+                <div className="ml-3 mt-1 space-y-1.5">
+                  {cases.map((c) => (
+                    <div key={c.caseId} className="px-2 py-1.5 rounded bg-white/[0.01] text-[9px]">
+                      <div className="flex justify-between text-white/60">
+                        <span className="truncate max-w-[140px]">{c.query}</span>
+                        {c.scores && (
+                          <span className="font-mono text-white/40 ml-1">
+                            R{c.scores.relevance.toFixed(1)} A{c.scores.accuracy.toFixed(1)} C{c.scores.completeness.toFixed(1)} H{c.scores.helpfulness.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 检查项 */}
+                      {c.checks && Object.entries(c.checks).map(([check, passed]) => (
+                        <div key={check} className={`mt-0.5 flex items-start gap-1 ${passed ? 'text-emerald-400/60' : 'text-red-400/60'}`}>
+                          <span className="flex-shrink-0">{passed ? '✅' : '❌'}</span>
+                          <span className="break-all">{check}</span>
+                        </div>
+                      ))}
+
+                      {/* RAG 命中 */}
+                      {c.retrievedSource && (
+                        <div className="mt-0.5 text-gray-500">
+                          📄 {c.retrievedSource}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Agent 综合分 */}
+                  <div className="px-2 py-1.5 grid grid-cols-4 gap-2 text-[9px]">
                     {['relevance','accuracy','completeness','helpfulness'].map((dim) => (
                       <div key={dim} className="text-center">
                         <div className="text-gray-500">{dim.slice(0, 4)}</div>
@@ -86,7 +119,8 @@ export function EvalPanel() {
                   </div>
                 </div>
               </details>
-            ))}
+              );
+            })}
           </>
         )}
       </div>

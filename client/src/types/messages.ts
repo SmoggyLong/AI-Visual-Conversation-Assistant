@@ -275,5 +275,17 @@ export interface EvalReport {
   elapsedMs: number;
   baselineScore: number;
   byAgent: Record<string, AgentEvalSummary>;
-  details: Record<string, unknown>;
+  details: Record<string, EvalCaseResult[]>;
+}
+
+export interface EvalCaseResult {
+  caseId: string;
+  agent: string;
+  query: string;
+  intent: string;
+  response: string;
+  scores: JudgeScores | null;
+  checks: Record<string, boolean>;
+  retrievedSource: string | null;
+  error: string | null;
 }

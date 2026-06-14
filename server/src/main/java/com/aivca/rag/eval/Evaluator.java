@@ -53,7 +53,7 @@ public class Evaluator {
             } catch (Exception e) {
                 log.warn("[EVAL] 案例 {} 评测失败: {}", tc.id(), e.getMessage());
                 results.add(new EvalResult(tc.id(), tc.agent(), tc.query(),
-                        "FAILED", null, null, null, e.getMessage()));
+                        "FAILED", null, null, null, null, e.getMessage()));
             }
         }
 
@@ -81,6 +81,7 @@ public class Evaluator {
         // 2. Agent 回答
         String response = null;
         String knowledgeCtx = null;
+        String retrievedSource = null;
         if (tc.agent() != null && !tc.agent().isEmpty()) {
             var intentResult = new com.aivca.api.llm.model.IntentResult(
                     com.aivca.constant.IntentType.fromString(tc.agent()),
@@ -93,15 +94,18 @@ public class Evaluator {
             ctx.setUrgency("normal");
             ctx.setConversationHistory(new ArrayList<>());
 
-            // RAG 检索
-            if (tc.expectedSource() != null && knowledgeBase.isReady()) {
+            // RAG 检索 (knowledge agent 时执行)
+            if (tc.agent() != null && tc.agent().contains("knowledge") && knowledgeBase.isReady()) {
                 var hits = knowledgeBase.searchHybrid(List.of(tc.query()), 5);
                 if (!hits.isEmpty()) {
                     var sb = new StringBuilder();
+                    var srcLabels = new ArrayList<String>();
                     for (SearchHit h : hits) {
                         sb.append(h.sourceLabel()).append(": ").append(h.content()).append("\n");
+                        srcLabels.add(h.source());
                     }
                     knowledgeCtx = sb.toString();
+                    retrievedSource = String.join(", ", srcLabels.stream().distinct().toList());
                 }
             }
 
@@ -129,7 +133,8 @@ public class Evaluator {
             checks.put("source:" + tc.expectedSource(), knowledgeCtx != null && knowledgeCtx.contains(tc.expectedSource()));
         }
 
-        return new EvalResult(tc.id(), tc.agent(), tc.query(), intent, response, scores, checks, null);
+        return new EvalResult(tc.id(), tc.agent(), tc.query(), intent, response,
+                scores, checks, retrievedSource, null);
     }
 
     private Map<String, List<EvalResult>> groupByAgent(List<EvalResult> results) {
@@ -156,7 +161,7 @@ public class Evaluator {
             String caseId, String agent, String query,
             String intent, String response,
             LLMJudge.JudgeScores scores, Map<String, Boolean> checks,
-            String error
+            String retrievedSource, String error
     ) {
         public boolean allChecksPassed() {
             return checks != null && checks.values().stream().allMatch(Boolean::booleanValue);
