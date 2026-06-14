@@ -7,24 +7,24 @@ import com.aivca.model.session.Episode;
 import com.aivca.model.session.TriggerEvent;
 import com.aivca.service.SessionManager;
 import com.aivca.service.EpisodeConsumer;
+import com.aivca.agent.Agent;
+import com.aivca.agent.AgentRouter;
+import com.aivca.agent.model.ChatResponse;
 import com.aivca.api.stt.SttService;
 import com.aivca.api.stt.BaiduSttService;
 import com.aivca.api.vision.VisionService;
 import com.aivca.api.vision.ZhipuVisionService;
-import com.aivca.util.VisionStructurer;
+import com.aivca.util.SpeechSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,79 +35,40 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
 
     private final SessionManager sessionManager;
     private final ObjectMapper objectMapper;
-    private final String baiduApiKey;
-    private final String baiduSecretKey;
-    private final String zhipuApiKey;
-    private final String deepseekApiKey;
-
-    /** 当前活跃的 WebSocket 连接，以 Spring WebSocket sessionId 为键 */
-    private final Map<String, WebSocketSession> activeConnections = new ConcurrentHashMap<>();
-
-    /** 每个 wsId 对应的 STT 服务实例 */
-    private final Map<String, SttService> sttServices = new ConcurrentHashMap<>();
-
-    /** 每个 sessionId 对应的 EpisodeConsumer（串行队列消费） */
-    private final Map<String, EpisodeConsumer> episodeConsumers = new ConcurrentHashMap<>();
-
-    /** 视觉分析服务（全局单例） */
+    private final AgentRouter agentRouter;
+    private final Orchestrator orchestrator;
     private final VisionService visionService;
 
-    /** 编排器 — 串联数据清洗 + 意图识别 */
-    private final Orchestrator orchestrator;
+    private final String zhipuApiKey;
+    private final String baiduApiKey;
+    private final String baiduSecretKey;
 
-    public ConversationWebSocketHandler(SessionManager sessionManager, ObjectMapper objectMapper) {
+    private final Map<String, WebSocketSession> activeConnections = new ConcurrentHashMap<>();
+    private final Map<String, SttService> sttServices = new ConcurrentHashMap<>();
+    private final Map<String, EpisodeConsumer> episodeConsumers = new ConcurrentHashMap<>();
+
+    public ConversationWebSocketHandler(SessionManager sessionManager, ObjectMapper objectMapper,
+                                         AgentRouter agentRouter, Orchestrator orchestrator,
+                                         @Value("${ZHIPU_API_KEY:}")   String zhipuApiKey,
+                                         @Value("${BAIDU_ASR_API_KEY:}") String baiduApiKey,
+                                         @Value("${BAIDU_ASR_SECRET_KEY:}") String baiduSecretKey) {
         this.sessionManager = sessionManager;
         this.objectMapper = objectMapper;
-
-        Map<String, String> env = loadDotenv();
-        this.baiduApiKey = env.getOrDefault("BAIDU_ASR_API_KEY", "");
-        this.baiduSecretKey = env.getOrDefault("BAIDU_ASR_SECRET_KEY", "");
-        this.zhipuApiKey = env.getOrDefault("ZHIPU_API_KEY", "");
-        this.deepseekApiKey = env.getOrDefault("DEEPSEEK_API_KEY", "");
-
-        log.info("[CONFIG] 百度 ASR | apiKey={}... | secretKey=****",
-                baiduApiKey.isEmpty() ? "(未设置)" : baiduApiKey.substring(0, Math.min(6, baiduApiKey.length())));
-        log.info("[CONFIG] 智谱 Vision | apiKey={}...",
-                zhipuApiKey.isEmpty() ? "(未设置)" : zhipuApiKey.substring(0, Math.min(6, zhipuApiKey.length())));
-        log.info("[CONFIG] DeepSeek Intent | apiKey={}...",
-                deepseekApiKey.isEmpty() ? "(未设置)" : deepseekApiKey.substring(0, Math.min(6, deepseekApiKey.length())));
-
+        this.agentRouter = agentRouter;
+        this.orchestrator = orchestrator;
+        this.zhipuApiKey = zhipuApiKey;
+        this.baiduApiKey = baiduApiKey;
+        this.baiduSecretKey = baiduSecretKey;
         this.visionService = zhipuApiKey.isEmpty()
                 ? null
                 : new ZhipuVisionService(zhipuApiKey, objectMapper);
 
-        this.orchestrator = zhipuApiKey.isEmpty()
-                ? null
-                : new Orchestrator(zhipuApiKey, deepseekApiKey, objectMapper);
+        log.info("[CONFIG] 百度 ASR | apiKey={}...",
+                baiduApiKey.isEmpty() ? "(未设置)" : baiduApiKey.substring(0, Math.min(6, baiduApiKey.length())));
+        log.info("[CONFIG] 智谱 Vision | apiKey={}...",
+                zhipuApiKey.isEmpty() ? "(未设置)" : zhipuApiKey.substring(0, Math.min(6, zhipuApiKey.length())));
     }
 
-    /** 读取 .env 文件为 Map */
-    private static Map<String, String> loadDotenv() {
-        Map<String, String> map = new HashMap<>();
-        Path path = Paths.get(".env");
-        if (!Files.exists(path)) {
-            System.err.println("[DOTENV] .env 文件不存在: " + path.toAbsolutePath());
-            return map;
-        }
-        try {
-            for (String line : Files.readAllLines(path)) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) continue;
-                String[] parts = line.split("=", 2);
-                if (parts.length == 2) {
-                    map.put(parts[0].trim(), parts[1].trim());
-                }
-            }
-            System.out.println("[DOTENV] 已加载 " + map.size() + " 个变量");
-        } catch (IOException e) {
-            System.err.println("[DOTENV] 读取失败: " + e.getMessage());
-        }
-        return map;
-    }
-
-    /**
-     * WebSocket 连接建立回调。
-     */
     @Override
     public void afterConnectionEstablished(WebSocketSession wsSession) {
         String wsId = wsSession.getId();
@@ -262,18 +223,36 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
             session.addBufferedFrames(frameData);
         } else {
             // 静默期间帧 → 入队给 Consumer
-            ensureConsumer(session);
+            ensureConsumer(session, wsSession);
             session.getEventQueue().offer(
                     new TriggerEvent(TriggerEvent.Type.VISION).withFrames(false, frameData));
         }
     }
 
     /** 确保 session 有对应的 EpisodeConsumer */
-    private void ensureConsumer(ConversationSession session) {
+    private void ensureConsumer(ConversationSession session, WebSocketSession wsSession) {
         String sid = session.getSessionId();
-        episodeConsumers.computeIfAbsent(sid, k ->
-                new EpisodeConsumer(session, orchestrator, zhipuApiKey, objectMapper,
-                        orchestrator.getAgentRouter()));
+        episodeConsumers.computeIfAbsent(sid, k -> {
+            EpisodeConsumer.ResponseCallback callback = new EpisodeConsumer.ResponseCallback() {
+                @Override
+                public void onResponse(ChatResponse resp, Agent agent, int conversationRound) {
+                    sendMessage(wsSession, MessageType.RESPONSE_TEXT,
+                            ResponseTextPayload.builder()
+                                    .messageId("resp_" + System.currentTimeMillis())
+                                    .role("assistant")
+                                    .content(resp.getText())
+                                    .conversationRound(conversationRound)
+                                    .build());
+                }
+
+                @Override
+                public void onStatus(String detail) {
+                    sendStatus(wsSession, StatusUpdatePayload.State.error, detail);
+                }
+            };
+            return new EpisodeConsumer(session, orchestrator, zhipuApiKey, objectMapper,
+                    agentRouter, callback);
+        });
     }
 
     /** 推送 VISION_RESULT 给前端 */
@@ -344,7 +323,12 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                     public void onFinal(String text) {
                         log.info("[STT] 最终识别结果 | wsId={} | sessionId={} | text={}",
                                 wsId, session.getSessionId(), text);
-                        session.addTurn(text, "");
+                        if (text == null || text.isBlank()) {
+                            log.debug("[STT] 空文本，跳过");
+                            closeSttSession(wsId);
+                            return;
+                        }
+                        session.addTurn(text, "", null);
                         sendMessage(wsSession, MessageType.RESPONSE_TEXT,
                                 ResponseTextPayload.builder()
                                         .messageId("stt_" + System.currentTimeMillis())
@@ -405,7 +389,19 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
             // STT 完成后 → 语音+累积帧打包为 SPEECH_BATCH
             String lastText = lastUserText(session);
             if (lastText != null && !lastText.isEmpty()) {
-                ensureConsumer(session);
+                // 纯噪声/语气词 → 不走完整管线，直接回复简短语
+                if (SpeechSanitizer.isNoise(lastText)) {
+                    log.debug("[STT] 噪声文本已过滤 | text={}", lastText);
+                    sendMessage(wsSession, MessageType.RESPONSE_TEXT,
+                            ResponseTextPayload.builder()
+                                    .messageId("noise_" + System.currentTimeMillis())
+                                    .role("assistant")
+                                    .content("我在听，请继续~")
+                                    .conversationRound(session.getConversationRound())
+                                    .build());
+                    return;
+                }
+                ensureConsumer(session, wsSession);
                 var allFrames = session.getAndClearBufferedFrames();
                 session.getEventQueue().offer(
                         new TriggerEvent(TriggerEvent.Type.SPEECH_BATCH)

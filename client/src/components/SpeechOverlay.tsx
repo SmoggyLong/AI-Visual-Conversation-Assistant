@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 interface SpeechOverlayProps {
   /** 当前正在识别的中间文本 */
   interimText: string;
+  /** AI 回复文本（显示在字幕区，与用户说话互斥） */
+  assistantText: string;
   /** 是否正在监听语音 */
   isListening: boolean;
   /** 网络是否不可用 */
@@ -12,29 +14,44 @@ interface SpeechOverlayProps {
 /**
  * 语音浮字层 —— 视频底部的半透明玻璃字幕条。
  *
- * 三种状态：
+ * 四种状态：
  * - 空闲（麦克风开着但没说话）：显示"等待语音输入..."
  * - 说话中：虚化大字显示识别文字 + 闪烁光标
+ * - AI 回复中：渐入显示 AI 回复文字，无光标
  * - 网络异常：黄色警告卡片
  */
 export function SpeechOverlay({
   interimText,
+  assistantText,
   isListening,
   isNetworkUnavailable,
 }: SpeechOverlayProps) {
   const [visible, setVisible] = useState(false);
   const [displayText, setDisplayText] = useState('');
+  const [mode, setMode] = useState<'idle' | 'user' | 'assistant'>('idle');
 
   useEffect(() => {
     if (interimText) {
       setDisplayText(interimText);
       setVisible(true);
-    } else {
-      // 空文本时延迟 3 秒再隐藏，让最终结果停留一会
-      const timer = setTimeout(() => setVisible(false), 3000);
+      setMode('user');
+    } else if (mode !== 'assistant') {
+      // 用户说话结束后 3 秒淡出。但 AI 回复不受此超时影响，保持显示
+      const timer = setTimeout(() => {
+        setVisible(false);
+        setMode('idle');
+      }, 3000);
       return () => clearTimeout(timer);
     }
-  }, [interimText]);
+  }, [interimText, mode]);
+
+  useEffect(() => {
+    if (assistantText && !interimText) {
+      setDisplayText(assistantText);
+      setVisible(true);
+      setMode('assistant');
+    }
+  }, [assistantText, interimText]);
 
   if (!isListening && !isNetworkUnavailable) return null;
 
@@ -76,7 +93,7 @@ export function SpeechOverlay({
 
             <div className="px-6 py-4">
               {/* ===== 有语音内容 ===== */}
-              {visible && displayText && (
+              {visible && displayText && mode === 'user' && (
                 <div className="flex items-center gap-3">
                   {/* 声波动画 */}
                   <div className="flex-shrink-0 flex items-center gap-0.5">
@@ -102,6 +119,26 @@ export function SpeechOverlay({
                 </div>
               )}
 
+              {/* ===== AI 回复 ===== */}
+              {visible && displayText && mode === 'assistant' && (
+                <div className="flex items-start gap-3">
+                  {/* 机器人图标 */}
+                  <div className="flex-shrink-0 w-8 h-8 mt-1 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                    </svg>
+                  </div>
+
+                  {/* AI 回复文字 */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-lg md:text-xl text-emerald-100/90 font-light tracking-wide leading-relaxed break-words animate-[fadeIn_0.5s_ease-out]">
+                      {displayText}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* ===== 空闲状态 ===== */}
               {!visible && !displayText && (
                 <div className="flex items-center gap-3">
@@ -116,10 +153,12 @@ export function SpeechOverlay({
               <div className="flex items-center justify-between mt-2">
                 <div className="flex items-center gap-1.5">
                   <span className={`w-1.5 h-1.5 rounded-full ${
-                    visible ? 'bg-green-400/70 animate-pulse' : 'bg-white/20'
+                    visible && mode === 'user' ? 'bg-green-400/70 animate-pulse'
+                    : visible && mode === 'assistant' ? 'bg-emerald-400/70'
+                    : 'bg-white/20'
                   }`} />
                   <span className="text-[10px] text-white/25 uppercase tracking-widest">
-                    {visible ? '识别中' : '就绪'}
+                    {mode === 'assistant' ? 'AI回复' : visible ? '识别中' : '就绪'}
                   </span>
                 </div>
                 {displayText && (

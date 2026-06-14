@@ -2,6 +2,7 @@ package com.aivca.service;
 
 import com.aivca.model.session.ConversationSession;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -10,37 +11,25 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 会话管理器 —— 负责会话的创建、查找、绑定与空闲回收。
- *
- * 负责：
- * - 创建新会话并分配唯一 sessionId
- * - WebSocket 连接 ID 与业务会话 ID 的绑定/解绑
- * - 空闲会话的定期清理
- *
- * 不负责：
- * - 会话数据持久化（当前为纯内存模式，后续迭代接入 Redis）
- * - 具体的消息处理逻辑（由 ConversationWebSocketHandler 负责）
+ * 会话管理器 —— 内存 + Redis 双写（参考 EchoMind 的 wm:{user}:{conv} 设计）。
  */
 @Slf4j
 @Service
 public class SessionManager {
 
-    /** 业务会话存储：sessionId → ConversationSession */
     private final Map<String, ConversationSession> sessions = new ConcurrentHashMap<>();
-
-    /** WebSocket ID 到头层 sessionId 的映射 */
     private final Map<String, String> wsToSession = new ConcurrentHashMap<>();
+    private final RedisTemplate<String, Object> redisTemplate;
 
-    /** 会话空闲超时：30 分钟 */
     private static final Duration IDLE_TIMEOUT = Duration.ofMinutes(30);
 
-    /**
-     * 创建新会话。
-     *
-     * @return 新创建的会话对象，含自动生成的 sessionId
-     */
+    public SessionManager(RedisTemplate<String, Object> redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
+
     public ConversationSession create() {
         ConversationSession session = new ConversationSession();
+        session.setRedis(redisTemplate);
         sessions.put(session.getSessionId(), session);
         log.info("[SESSION] 会话已创建 | sessionId={}", session.getSessionId());
         return session;

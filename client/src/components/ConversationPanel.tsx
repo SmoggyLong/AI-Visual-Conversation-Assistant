@@ -21,14 +21,14 @@ export function ConversationPanel({ messages }: ConversationPanelProps) {
   }, [messages]);
 
   return (
-    <div className="flex flex-col border-l border-white/[0.04] bg-gray-950/40 backdrop-blur-sm">
+    <div className="h-full flex flex-col border-l border-white/[0.04] bg-gray-950/40 backdrop-blur-sm">
       {/* 标题 */}
       <div className="flex-shrink-0 px-4 py-3 border-b border-white/[0.04]">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-gray-500 tracking-wider uppercase">记录</span>
           {messages.length > 0 && (
             <span className="text-[10px] text-gray-700 font-mono">
-              {messages.filter((m) => m.role === 'user').length}
+              {messages.filter((m) => m.role === 'user' && m.text && m.text.trim()).length}
             </span>
           )}
         </div>
@@ -49,7 +49,9 @@ export function ConversationPanel({ messages }: ConversationPanelProps) {
             </div>
           </div>
         ) : (
-          messages.map((msg) => (
+          messages
+            .filter((msg) => msg.text && msg.text.trim())
+            .map((msg) => (
             <div
               key={msg.id}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}

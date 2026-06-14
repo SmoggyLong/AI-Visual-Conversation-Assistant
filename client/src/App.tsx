@@ -31,6 +31,7 @@ export default function App() {
   const [serverStatus, setServerStatus] = useState<StatusUpdatePayload['state'] | null>(null);
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [interimText, setInterimText] = useState('');
+  const [assistantText, setAssistantText] = useState('');
 
   const camera = useCamera({
     onStateChange: (payload) => sendMessage('CAMERA_CONTROL', payload),
@@ -103,6 +104,7 @@ export default function App() {
   const handleSpeechStart = useCallback(() => {
     sendMessage('SPEECH_START', { timestamp: Date.now() });
     setInterimText('');
+    setAssistantText('');
   }, [sendMessage]);
 
   const handleSpeechEnd = useCallback(() => {
@@ -127,7 +129,7 @@ export default function App() {
         break;
       }
       case 'RESPONSE_TEXT': {
-        const payload = msg.payload as { content: string; messageId: string };
+        const payload = msg.payload as { content: string; role: string; messageId: string };
         const content = payload.content;
 
         // 中间结果（流式识别进行中）
@@ -136,16 +138,22 @@ export default function App() {
           return;
         }
 
-        // 最终结果 → 写入对话记录
+        // 区分 assistant 回复 vs user 识别结果
+        const trimmed = content.trim();
+        if (!trimmed) break;  // 空文本不记录
+        const role = payload.role === 'assistant' ? 'assistant' : 'user';
         setConversationMessages((prev) => [
           ...prev,
           {
             id: nextMessageId(),
-            role: 'user',
-            text: content.trim(),
+            role,
+            text: trimmed,
             timestamp: Date.now(),
           },
         ]);
+        if (role === 'assistant') {
+          setAssistantText(content.trim());
+        }
         setInterimText('');
         break;
       }
@@ -166,11 +174,12 @@ export default function App() {
           <CameraView camera={camera} />
           <SpeechOverlay
             interimText={interimText}
+            assistantText={assistantText}
             isListening={microphone.state.enabled}
             isNetworkUnavailable={false}
           />
         </div>
-        <div className="flex-[3] min-w-[280px] max-w-[400px]">
+        <div className="flex-[3] min-w-[280px] max-w-[400px] overflow-hidden">
           <ConversationPanel messages={conversationMessages} />
         </div>
       </div>

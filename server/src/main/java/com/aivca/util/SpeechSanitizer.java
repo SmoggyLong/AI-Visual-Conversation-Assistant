@@ -44,4 +44,12 @@ public final class SpeechSanitizer {
 
         return s;
     }
+
+    /**
+     * 判断文本是否为纯噪声/语气词（清洗后无有效内容）。
+     * 用于跳过完整管线，直接回复简短语。
+     */
+    public static boolean isNoise(String raw) {
+        return sanitize(raw) == null;
+    }
 }

@@ -8,6 +8,8 @@ public class ChatResponse {
     private String text;
     private String action;
     private String expression;
+    /** GameAgent 使用的成语，供服务端追踪已用成语列表 */
+    private String idiom;
 
     public ChatResponse() {}
 
@@ -25,4 +27,7 @@ public class ChatResponse {
 
     public String getExpression() { return expression; }
     public void setExpression(String expression) { this.expression = expression; }
+
+    public String getIdiom() { return idiom; }
+    public void setIdiom(String idiom) { this.idiom = idiom; }
 }

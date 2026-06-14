@@ -8,6 +8,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 
 /**
  * HTTP 请求工具类。
@@ -16,7 +17,9 @@ public final class HttpUtil {
 
     private HttpUtil() {}
 
-    private static final HttpClient HTTP = HttpClient.newHttpClient();
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
 
     /** 发送 POST JSON 请求，返回响应 JsonNode */
     public static JsonNode postJson(String url, String jsonBody, ObjectMapper mapper)
