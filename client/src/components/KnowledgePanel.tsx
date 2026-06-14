@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useKnowledge } from '../hooks/useKnowledge';
 import type { DocInput } from '../types/messages';
 
@@ -8,14 +8,48 @@ export function KnowledgePanel() {
   const { docs, stats, loading, fetchList, fetchStats, reload, addDoc, uploadFile } = useKnowledge();
   const [showAdd, setShowAdd] = useState(false);
   const [input, setInput] = useState<DocInput>(emptyInput);
+  const [toast, setToast] = useState<{ message: string; type: 'ok' | 'err' } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => { fetchList(); fetchStats(); }, [fetchList, fetchStats]);
 
+  const showToast = (message: string, type: 'ok' | 'err') => {
+    setToast({ message, type });
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  };
+
   const handleAdd = async () => {
     if (!input.title.trim() || !input.content.trim()) return;
-    await addDoc(input);
+    const result = await addDoc(input);
+    if (result?.status === 'ok') {
+      showToast(`已入库: ${input.title} (${result.totalChunks ?? 0} 块)`, 'ok');
+    } else {
+      showToast(result?.message || '添加失败', 'err');
+    }
     setInput(emptyInput);
     setShowAdd(false);
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const result = await uploadFile(file);
+    if (result?.status === 'ok') {
+      showToast(`已上传: ${file.name} (${result.chunks ?? 0} 块)`, 'ok');
+    } else {
+      showToast(result?.message || '上传失败', 'err');
+    }
+    e.target.value = '';
+  };
+
+  const handleReload = async () => {
+    const result = await reload();
+    if (result) {
+      showToast(`重载完成: ${result.newDocs ?? 0} 篇, ${result.newChunks ?? 0} 块`, 'ok');
+    } else {
+      showToast('重载失败，请检查后端', 'err');
+    }
   };
 
   return (
@@ -35,15 +69,11 @@ export function KnowledgePanel() {
             <label className="px-2 py-1 rounded-lg text-[10px] bg-white/5 hover:bg-white/10 text-gray-500 transition-colors cursor-pointer" title="从文件导入">
               ↑
               <input type="file" accept=".md,.json,.txt,.pdf" className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (file) await uploadFile(file);
-                  e.target.value = '';
-                }}
+                onChange={handleUpload}
               />
             </label>
             <button
-              onClick={reload}
+              onClick={handleReload}
               disabled={loading}
               className="px-2 py-1 rounded-lg text-[10px] bg-white/5 hover:bg-white/10 text-gray-500 transition-colors"
               title="从磁盘重新加载"
@@ -59,6 +89,17 @@ export function KnowledgePanel() {
           </div>
         </div>
       </div>
+
+      {/* 操作反馈 Toast */}
+      {toast && (
+        <div className={`flex-shrink-0 mx-3 mt-1 px-3 py-1.5 rounded-lg text-[10px] border transition-all ${
+          toast.type === 'ok'
+            ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400/80'
+            : 'bg-red-500/5 border-red-500/20 text-red-400/80'
+        }`}>
+          {toast.type === 'ok' ? '✅' : '❌'} {toast.message}
+        </div>
+      )}
 
       {/* 文档列表 */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
