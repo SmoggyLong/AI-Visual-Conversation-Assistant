@@ -270,6 +270,7 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                                     .messageId("resp_" + System.currentTimeMillis())
                                     .role("assistant")
                                     .agent(agent.name())
+                                    .expression(resp.getExpression())
                                     .content(resp.getText())
                                     .conversationRound(conversationRound)
                                     .build());

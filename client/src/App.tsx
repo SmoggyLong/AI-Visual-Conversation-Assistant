@@ -145,14 +145,26 @@ export default function App() {
     audioRef.current.play().catch(() => {});
   };
 
-  /** 浏览器内置语音合成（免费、零延迟） */
-  const speakText = (text: string) => {
+  /** 浏览器内置语音合成（根据表情调整语调） */
+  const speakText = (text: string, expression?: string) => {
     if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel(); // 打断正在播放的语音
+    window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'zh-CN';
-    u.rate = 1.1;
-    u.pitch = 1.0;
+
+    // 根据表情调整语速和音调
+    switch (expression) {
+      case 'happy':
+        u.rate = 1.15; u.pitch = 1.15; break;
+      case 'curious':
+        u.rate = 0.95; u.pitch = 1.05; break;
+      case 'surprised':
+        u.rate = 1.05; u.pitch = 1.25; break;
+      case 'thinking':
+        u.rate = 0.85; u.pitch = 0.95; break;
+      default:  // neutral
+        u.rate = 1.0; u.pitch = 1.0; break;
+    }
     u.volume = 0.8;
     window.speechSynthesis.speak(u);
   };
@@ -170,7 +182,7 @@ export default function App() {
         break;
       }
       case 'RESPONSE_TEXT': {
-        const payload = msg.payload as { content: string; role: string; messageId: string; agent?: string };
+        const payload = msg.payload as { content: string; role: string; messageId: string; agent?: string; expression?: string };
         const content = payload.content;
 
         // 中间结果（流式识别进行中）
@@ -202,7 +214,7 @@ export default function App() {
         if (role === 'assistant') {
           setAssistantText(content.trim());
           setCurrentAgent(payload.agent || null);
-          speakText(trimmed);
+          speakText(trimmed, payload.expression);
         }
         setInterimText('');
         break;

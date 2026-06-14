@@ -30,4 +30,7 @@ public class ResponseTextPayload {
 
     /** 处理本消息的 Agent 名称 */
     private String agent;
+
+    /** 表情：happy/curious/neutral/surprised */
+    private String expression;
 }
