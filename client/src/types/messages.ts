@@ -61,11 +61,21 @@ export interface MicrophoneControlPayload {
 
 export interface FrameDataPayload {
   format: 'jpeg';
-  width: number;
-  height: number;
-  data: string;          // base64
-  changed: boolean;      // 帧差检测：画面是否变化
-  imageChecksum: string; // 图片哈希，用于缓存去重
+  width?: number;
+  height?: number;
+  data?: string;
+  changed: boolean;
+  isSpeaking?: boolean;     // 是否在说话期间截取
+  imageChecksum?: string;
+  frames?: FrameItem[];
+}
+
+/** 批次中的单帧 */
+export interface FrameItem {
+  data: string;
+  format: 'jpeg';
+  checksum: string;
+  offsetMs: number;        // 相对当前时刻的偏移（-1000 = 1秒前）
 }
 
 export interface AudioDataPayload {
@@ -204,4 +214,78 @@ export interface ConversationMessage {
   isInterim?: boolean;
   /** 消息时间戳（毫秒） */
   timestamp: number;
+}
+
+// ============================================================
+// 知识库文档类型
+// ============================================================
+
+export interface KnowledgeDoc {
+  docId: string;
+  title: string;
+  type: 'SOP' | 'GENERAL';
+  sourceFile: string;
+  keywords: string[];
+  totalChunks: number;
+  createdAt?: string;
+}
+
+export interface KnowledgeStats {
+  totalDocs: number;
+  totalChunks: number;
+  sopCount: number;
+  generalCount: number;
+}
+
+export interface KnowledgeReloadResult {
+  status: string;
+  files: number;
+  newDocs: number;
+  newChunks: number;
+}
+
+export interface DocInput {
+  title: string;
+  content: string;
+  type: 'SOP' | 'GENERAL';
+  keywords: string;
+}
+
+// ============================================================
+// 评测类型
+// ============================================================
+
+export interface JudgeScores {
+  relevance: number;
+  accuracy: number;
+  completeness: number;
+  helpfulness: number;
+  overall: number;
+}
+
+export interface AgentEvalSummary {
+  cases: number;
+  passedChecks: number;
+  avgScores: JudgeScores;
+}
+
+export interface EvalReport {
+  totalCases: number;
+  passedCases: number;
+  elapsedMs: number;
+  baselineScore: number;
+  byAgent: Record<string, AgentEvalSummary>;
+  details: Record<string, EvalCaseResult[]>;
+}
+
+export interface EvalCaseResult {
+  caseId: string;
+  agent: string;
+  query: string;
+  intent: string;
+  response: string;
+  scores: JudgeScores | null;
+  checks: Record<string, boolean>;
+  retrievedSource: string | null;
+  error: string | null;
 }
