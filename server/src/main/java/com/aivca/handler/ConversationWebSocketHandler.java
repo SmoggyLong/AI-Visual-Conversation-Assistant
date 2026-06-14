@@ -277,7 +277,17 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
 
                 @Override
                 public void onStatus(String detail) {
-                    sendStatus(wsSession, StatusUpdatePayload.State.error, detail);
+                    sendStatus(wsSession, StatusUpdatePayload.State.thinking, detail);
+                }
+
+                @Override
+                public void onVisionResult(String description) {
+                    if (!wsSession.isOpen()) return;
+                    sendMessage(wsSession, MessageType.VISION_RESULT,
+                            VisionResultPayload.builder()
+                                    .description(description)
+                                    .timestamp(System.currentTimeMillis())
+                                    .build());
                 }
 
                 @Override

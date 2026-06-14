@@ -23,6 +23,8 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Episode 消费者 —— 每 session 一个线程，严格串行。
@@ -60,6 +62,7 @@ public class EpisodeConsumer implements Runnable {
         void onResponse(ChatResponse resp, Agent agent, int conversationRound);
         default void onStatus(String detail) {}
         default void onAudio(String base64Mp3) {}
+        default void onVisionResult(String description) {}
     }
 
     public EpisodeConsumer(ConversationSession session, Orchestrator orchestrator,
@@ -148,7 +151,7 @@ public class EpisodeConsumer implements Runnable {
         // VISION 只积累画面，不自动回复。回复仅在 SPEECH_BATCH 时触发。
     }
 
-    /** 语音+累积帧 → Vision → setSpeech → forceClose → respond */
+    /** 语音+累积帧 → Vision(异步) + Intent(并行) → Agent → 回复 */
     private void handleSpeechBatch(TriggerEvent event) {
         Episode ep = session.getCurrentEpisode();
         if (ep == null || ep.isClosed()) {
@@ -162,25 +165,43 @@ public class EpisodeConsumer implements Runnable {
                 truncate(event.getSpeech(), 40),
                 event.getFrames() != null ? event.getFrames().size() : 0);
 
+        // Vision 异步执行 — 和 Intent 识别并行
+        CompletableFuture<Void> visionFuture = CompletableFuture.completedFuture(null);
         if (event.getFrames() != null && !event.getFrames().isEmpty()) {
-            String desc = visionService.describeBatch(new ArrayList<>(event.getFrames()));
-            if (desc != null && !desc.isEmpty()) {
-                VisionStructurer vs = VisionStructurer.parse(desc);
-                ep.updateVision(vs.getDescription(), vs.getAction());
-                session.setCachedVisionDescription(desc);
-                log.info("[EP-{}] VISION 完成 | desc={}", ep.getId(), truncate(vs.getDescription(), 60));
-            }
+            var frames = new ArrayList<>(event.getFrames());
+            final Episode epForVision = ep;
+            final ConversationSession sessForVision = session;
+            final ResponseCallback cb = callback;
+            visionFuture = CompletableFuture.runAsync(() -> {
+                String desc = visionService.describeBatch(frames);
+                if (desc != null && !desc.isEmpty()) {
+                    VisionStructurer vs = VisionStructurer.parse(desc);
+                    epForVision.updateVision(vs.getDescription(), vs.getAction());
+                    sessForVision.setCachedVisionDescription(desc);
+                    try {
+                        cb.onVisionResult(vs.getDescription());
+                    } catch (Exception e) {
+                        log.debug("[EP-{}] 推送Vision结果失败", epForVision.getId());
+                    }
+                    log.info("[EP-{}] VISION 完成 | desc={}", epForVision.getId(), truncate(vs.getDescription(), 60));
+                }
+            });
         }
 
         ep.forceClose("speech");
         ep.setClosed(true);
         ep.setCloseTime(java.time.Instant.now());
         log.info("[EP-{}] ═══ EPISODE 关闭 ═══ | reason=speech", ep.getId());
-        respond(ep);
+
+        // 即刻推送思考状态，开始处理
+        try { callback.onStatus("思考中..."); } catch (Exception ignored) {}
+
+        respond(ep, visionFuture);
     }
 
-    private void respond(Episode ep) {
+    private void respond(Episode ep, CompletableFuture<Void> visionFuture) {
         try {
+            // Intent 识别 — 和 Vision 并行执行（不依赖 Vision 结果）
             IntentResult result = orchestrator.recognizeIntent(session);
             log.info("[EP-{}] INTENT | intent={} | urgency={} | confidence={} | reasoning={}",
                     ep.getId(),
@@ -188,6 +209,17 @@ public class EpisodeConsumer implements Runnable {
                     result.getUrgency().toValue(),
                     result.getConfidence(),
                     result.getReasoning());
+
+            // 推送意图结果给前端
+            try { callback.onStatus("已识别: " + result.getIntent().toValue()); } catch (Exception ignored) {}
+
+            // 等待 Vision 完成（如果还没完）
+            if (!visionFuture.isDone()) {
+                log.debug("[EP-{}] 等待 Vision 完成...", ep.getId());
+                try { visionFuture.get(8, TimeUnit.SECONDS); }
+                catch (java.util.concurrent.TimeoutException te) { log.warn("[EP-{}] Vision 超时", ep.getId()); }
+                catch (Exception e) { log.debug("[EP-{}] Vision 异步异常: {}", ep.getId(), e.getMessage()); }
+            }
 
             Agent agent = agentRouter.route(result);
 
