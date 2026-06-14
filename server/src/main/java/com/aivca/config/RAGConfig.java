@@ -1,6 +1,7 @@
 package com.aivca.config;
 
 import com.aivca.rag.LlmTextCleaner;
+import com.aivca.rag.SpeechCorrector;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -41,5 +42,11 @@ public class RAGConfig {
     LlmTextCleaner llmTextCleaner(@Qualifier("zhipuFlashModel") ChatLanguageModel flashModel) {
         log.info("[RAG] 初始化 LlmTextCleaner | model=glm-4-flash");
         return new LlmTextCleaner(flashModel);
+    }
+
+    @Bean
+    SpeechCorrector speechCorrector(@Qualifier("zhipuFlashModel") ChatLanguageModel flashModel) {
+        log.info("[RAG] 初始化 SpeechCorrector | model=glm-4-flash");
+        return new SpeechCorrector(flashModel);
     }
 }

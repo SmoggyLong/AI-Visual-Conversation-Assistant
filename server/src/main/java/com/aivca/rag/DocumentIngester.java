@@ -104,7 +104,7 @@ public class DocumentIngester {
                                 .put("chunk_index", String.valueOf(i))
                                 .put("total_chunks", String.valueOf(chunks.size()))
                                 .put("source", sourceFile));
-                embeddingStore.add(chunkId, emb);
+                embeddingStore.add(emb, segment);
 
                 // 6b. MongoDB
                 KnowledgeDoc kDoc = new KnowledgeDoc();

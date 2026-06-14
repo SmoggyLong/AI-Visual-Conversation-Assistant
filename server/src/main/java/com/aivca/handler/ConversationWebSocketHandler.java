@@ -14,6 +14,8 @@ import com.aivca.api.stt.SttService;
 import com.aivca.api.stt.BaiduSttService;
 import com.aivca.api.vision.VisionService;
 import com.aivca.api.vision.ZhipuVisionService;
+import com.aivca.rag.KnowledgeBase;
+import com.aivca.rag.SpeechCorrector;
 import com.aivca.util.SpeechSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,6 +40,8 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
     private final AgentRouter agentRouter;
     private final Orchestrator orchestrator;
     private final VisionService visionService;
+    private final SpeechCorrector corrector;
+    private final KnowledgeBase knowledgeBase;
 
     private final String zhipuApiKey;
     private final String baiduApiKey;
@@ -49,6 +53,8 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
 
     public ConversationWebSocketHandler(SessionManager sessionManager, ObjectMapper objectMapper,
                                          AgentRouter agentRouter, Orchestrator orchestrator,
+                                         SpeechCorrector corrector,
+                                         KnowledgeBase knowledgeBase,
                                          @Value("${ZHIPU_API_KEY:}")   String zhipuApiKey,
                                          @Value("${BAIDU_ASR_API_KEY:}") String baiduApiKey,
                                          @Value("${BAIDU_ASR_SECRET_KEY:}") String baiduSecretKey) {
@@ -56,6 +62,8 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
         this.objectMapper = objectMapper;
         this.agentRouter = agentRouter;
         this.orchestrator = orchestrator;
+        this.corrector = corrector;
+        this.knowledgeBase = knowledgeBase;
         this.zhipuApiKey = zhipuApiKey;
         this.baiduApiKey = baiduApiKey;
         this.baiduSecretKey = baiduSecretKey;
@@ -332,12 +340,24 @@ public class ConversationWebSocketHandler extends TextWebSocketHandler {
                             closeSttSession(wsId);
                             return;
                         }
-                        session.addTurn(text, "", null);
+
+                        // 语音纠错
+                        String corrected = text;
+                        try {
+                            String context = session.getConversationSummary() != null
+                                    ? session.getConversationSummary() : "";
+                            var terms = knowledgeBase.getDomainTerms();
+                            corrected = corrector.correct(text, context, terms);
+                        } catch (Exception e) {
+                            log.debug("[STT] 纠错异常，使用原文: {}", e.getMessage());
+                        }
+
+                        session.addTurn(corrected, "", null);
                         sendMessage(wsSession, MessageType.RESPONSE_TEXT,
                                 ResponseTextPayload.builder()
                                         .messageId("stt_" + System.currentTimeMillis())
                                         .role("user")
-                                        .content(text)
+                                        .content(corrected)
                                         .conversationRound(session.getConversationRound())
                                         .build());
                         sendStatus(wsSession, StatusUpdatePayload.State.idle, "识别完成");

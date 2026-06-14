@@ -149,7 +149,7 @@ public class KnowledgeBase {
                                 .put("chunk_index", String.valueOf(doc.getChunkIndex()))
                                 .put("total_chunks", String.valueOf(doc.getTotalChunks()))
                                 .put("source", doc.getSourceFile()));
-                embeddingStore.add(doc.getId(), emb);
+                embeddingStore.add(emb, segment);
             }
             log.info("[KB] MongoDB → 内存 加载完成 | {} 条", all.size());
         } catch (Exception e) {
@@ -226,6 +226,95 @@ public class KnowledgeBase {
             }
         }
         return result;
+    }
+
+    /** 获取所有领域术语（知识库关键词词条集合），供语音纠错使用 */
+    public List<String> getDomainTerms() {
+        return new ArrayList<>(keywordIndex.keySet());
+    }
+
+    // ==================== 检索 ====================
+
+    /** 查询缓存：query → results，TTL 300s */
+    private final Map<String, List<SearchHit>> searchCache = new ConcurrentHashMap<>();
+
+    /**
+     * KNN 向量检索。
+     *
+     * @param query 查询文本
+     * @param topK  返回数量
+     * @return 检索命中列表
+     */
+    public List<SearchHit> search(String query, int topK) {
+        if (!ready || query == null || query.isBlank()) return List.of();
+
+        String cacheKey = query.trim().toLowerCase();
+        List<SearchHit> cached = searchCache.get(cacheKey);
+        if (cached != null) return cached;
+
+        try {
+            var queryEmb = embeddingModel.embed(query).content();
+            var result = embeddingStore.search(
+                    dev.langchain4j.store.embedding.EmbeddingSearchRequest.builder()
+                            .queryEmbedding(queryEmb)
+                            .maxResults(topK)
+                            .minScore(0.5)
+                            .build());
+
+            List<SearchHit> hits = new ArrayList<>();
+            for (var match : result.matches()) {
+                var meta = match.embedded().metadata();
+                KnowledgeDoc doc = mongoTemplate.findById(meta.getString("doc_id"), KnowledgeDoc.class);
+                if (doc != null) {
+                    hits.add(new SearchHit(doc.getDocId(), doc.getTitle(), doc.getContent(),
+                            match.score(), doc.getSourceFile(), doc.getType()));
+                }
+            }
+
+            searchCache.put(cacheKey, hits);
+            scheduleEvict(cacheKey);
+            return hits;
+        } catch (Exception e) {
+            log.warn("[KB] 向量检索失败: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 混合检索：KNN 向量 + BM25 关键词，SOP 结果优先。
+     */
+    public List<SearchHit> searchHybrid(List<String> queries, int topK) {
+        var merged = new java.util.LinkedHashMap<String, SearchHit>();  // docId → hit, 去重
+
+        for (String q : queries) {
+            // 1. KNN
+            for (SearchHit hit : search(q, topK)) {
+                merged.putIfAbsent(hit.docId(), hit);
+            }
+            // 2. BM25 关键词
+            for (String docId : searchByKeywords(q)) {
+                if (!merged.containsKey(docId)) {
+                    KnowledgeDoc doc = mongoTemplate.findById(docId, KnowledgeDoc.class);
+                    if (doc != null) {
+                        merged.put(docId, new SearchHit(doc.getDocId(), doc.getTitle(),
+                                doc.getContent(), 0.8, doc.getSourceFile(), doc.getType()));
+                    }
+                }
+            }
+        }
+
+        // SOP 优先 → score 降序
+        return merged.values().stream()
+                .sorted(java.util.Comparator
+                        .comparing(SearchHit::type, (a, b) -> a == DocType.SOP ? -1 : b == DocType.SOP ? 1 : 0)
+                        .thenComparing(SearchHit::score, java.util.Comparator.reverseOrder()))
+                .toList();
+    }
+
+    /** 缓存逐出（300s 后清理） */
+    private void scheduleEvict(String key) {
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+                .schedule(() -> searchCache.remove(key), 300, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     // ==================== 文档增删 ====================

@@ -2,6 +2,9 @@ package com.aivca.agent;
 
 import com.aivca.api.llm.model.IntentResult;
 import com.aivca.constant.IntentType;
+import com.aivca.rag.KnowledgeBase;
+import com.aivca.rag.QueryRewriter;
+import com.aivca.rag.Reranker;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import lombok.extern.slf4j.Slf4j;
@@ -25,10 +28,14 @@ public class AgentRouter {
             @Qualifier("deepseekModel")   ChatLanguageModel ds,
             @Qualifier("zhipuFlashModel") ChatLanguageModel zpFlash,
             @Qualifier("zhipu7Model")     ChatLanguageModel zp7,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            KnowledgeBase knowledgeBase,
+            QueryRewriter rewriter,
+            Reranker reranker) {
 
         agentMap.put(IntentType.VISION,       new VisionAgent(ds, ds, objectMapper));
-        agentMap.put(IntentType.KNOWLEDGE,    new KnowledgeAgent(ds, ds, objectMapper));
+        agentMap.put(IntentType.KNOWLEDGE,    new KnowledgeAgent(ds, ds, objectMapper,
+                                                       knowledgeBase, rewriter, reranker));
         agentMap.put(IntentType.CONVERSATION, new ConversationAgent(zpFlash, zpFlash, objectMapper));
         agentMap.put(IntentType.GAME,         new GameAgent(ds, ds, objectMapper));
 
