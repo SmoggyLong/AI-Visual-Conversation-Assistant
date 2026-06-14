@@ -34,13 +34,13 @@ public class Orchestrator {
         String context = ContextBuilder.build(cleanSpeech, vision);
 
         // 注入对话状态：上一轮的 Agent 类型帮助意图识别 (如游戏接龙中)
-        String state;
+        // 注意: history.last 是当前轮次 (agentType 还未回填), 需查倒数第二个
         var history = session.getHistory();
-        if (!history.isEmpty()) {
-            var lastTurn = history.get(history.size() - 1);
-            if ("game".equals(lastTurn.getAgentType())) {
-                state = "\n[对话状态]\n当前正在进行成语接龙游戏，用户的输入很可能是成语接龙内容。\n";
-                context = (context != null ? context : "") + state;
+        if (history.size() >= 2) {
+            var prevTurn = history.get(history.size() - 2);  // 上一轮
+            if ("game".equals(prevTurn.getAgentType())) {
+                context = (context != null ? context : "")
+                        + "\n[对话状态]\n当前正在进行成语接龙游戏，用户的输入可能是成语接龙内容。\n";
             }
         }
 
