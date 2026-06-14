@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Docker 常用命令",
+    "type": "general",
+    "keywords": ["docker,容器,镜像,compose,部署"],
+    "content": "Docker 基础命令：docker ps 查看运行容器。docker images 查看本地镜像。docker run -d -p 8080:8080 --name app image 启动容器并映射端口。docker logs -f app 查看日志。docker exec -it app /bin/bash 进入容器。docker-compose up -d 启动所有服务。docker-compose down 停止并删除容器。docker system prune -a 清理未使用资源。Windows 下镜像文件较大，建议定期清理。"
+  },
+  {
+    "title": "Git 工作流",
+    "type": "general",
+    "keywords": ["git,分支,提交,合并,回滚"],
+    "content": "Git 常用工作流：git checkout -b feat/xxx 创建功能分支。git add . && git commit -m 'msg' 暂存并提交。git pull --rebase origin main 拉取最新代码并变基。git push origin feat/xxx 推送分支。git merge feat/xxx 合并分支。提交信息规范：feat/fix/refactor/docs/chore 前缀。合并前先 rebase 保持历史整洁。出错时 git reset --soft HEAD~1 撤销提交保留修改。"
+  },
+  {
+    "title": "Redis 数据结构速查",
+    "type": "general",
+    "keywords": ["redis,缓存,key,数据结构"],
+    "content": "Redis 五种基础数据结构：String 最常用，SET key value EX 3600 设置带过期时间的键值对。List 双向链表，LPUSH/RPUSH 左右插入，LRANGE 获取范围。Hash 键值对集合，HSET key field value，HGETALL 获取全部字段。Set 无序不重复，SADD 添加，SINTER 求交集。Sorted Set 有序集合，ZADD key score member，ZRANGE 按分数范围获取。还有发布订阅、事务、Lua脚本等高级功能。"
+  }
+]
