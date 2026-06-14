@@ -14,8 +14,7 @@ public final class VisionConstants {
     public static final String VISION_MODEL = "glm-4.6v";
 
     public static final String VISION_PROMPT =
-            "分析画面，输出格式：\n主体类型：人物/动物/物体/场景\n描述：[对应属性]\n动作：[挥手/点头/指向/站立/走动等，无则填无]\n文字：[提取画面中文字，无则填无]";
+            "分析画面，严格按照以下格式输出，每行一个字段：\n主体类型：人物/动物/物体/场景\n描述：简洁描述画面内容（衣着、位置、物体等）\n动作：画面中人物的动作（挥手、点头、指向、站立、走动、无等）\n文字：画面中的文字，无则写\"无\"\n\n示例输出：\n主体类型：人物\n描述：戴着眼镜的人，穿蓝色上衣\n动作：挥手\n文字：无";
 
-    /** Vision 结果最大 token 数（需覆盖 reasoning_tokens + 回答） */
-    public static final int MAX_TOKENS = 300;
+    public static final int MAX_TOKENS = 400;
 }

@@ -111,7 +111,7 @@ public class ZhipuVisionService implements VisionService {
 
         String prompt = base64Frames.size() == 1
                 ? VisionConstants.VISION_PROMPT
-                : "这" + base64Frames.size() + "帧是连续的摄像头画面（200ms间隔），重点观察人物的动作行为（挥手、点头、指向、走动等）。输出格式：\n主体类型：xxx\n描述：xxx\n动作：xxx（必填，无动作填\"无\"）";
+                : "这" + base64Frames.size() + "帧是连续的摄像头画面（200ms间隔），仔细观察帧间差异判断人物动作。\n严格按照格式输出：\n主体类型：xxx\n描述：xxx\n动作：xxx（必须判断，挥手/点头/指向/静坐等，不同帧间位置变化即为动作）\n文字：xxx（无则填\"无\"）\n\n示例：\n主体类型：人物\n描述：戴眼镜的人坐在电脑前\n动作：挥手\n文字：无";
 
         Map<String, Object> textPart = new LinkedHashMap<>();
         textPart.put("type", "text");
