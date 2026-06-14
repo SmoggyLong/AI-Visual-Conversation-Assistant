@@ -2,7 +2,7 @@
 
 > **一款基于端云协同架构的 AI 视觉对话应用。打开摄像头与麦克风，AI 能看见你、听懂你、用语音回复你。**
 
-🎥 [**演示视频**](https://www.bilibili.com/video/BV1nkJK6qEmx/)
+🎥 [**演示视频**](https://www.bilibili.com/video/BV13nJK6QEA3/)
 
 ---
 
