@@ -276,7 +276,10 @@ public class KnowledgeBase {
             List<SearchHit> hits = new ArrayList<>();
             for (var match : result.matches()) {
                 var meta = match.embedded().metadata();
-                KnowledgeDoc doc = mongoTemplate.findById(meta.getString("doc_id"), KnowledgeDoc.class);
+                // findBy docId (not _id) — 文档级查找，取第一条 chunk 拿 title/source
+                KnowledgeDoc doc = mongoTemplate.findOne(
+                        Query.query(Criteria.where("docId").is(meta.getString("doc_id"))),
+                        KnowledgeDoc.class);
                 if (doc != null) {
                     hits.add(new SearchHit(doc.getDocId(), doc.getTitle(), doc.getContent(),
                             match.score(), doc.getSourceFile(), doc.getType()));
@@ -306,7 +309,8 @@ public class KnowledgeBase {
             // 2. BM25 关键词
             for (String docId : searchByKeywords(q)) {
                 if (!merged.containsKey(docId)) {
-                    KnowledgeDoc doc = mongoTemplate.findById(docId, KnowledgeDoc.class);
+                    KnowledgeDoc doc = mongoTemplate.findOne(
+                            Query.query(Criteria.where("docId").is(docId)), KnowledgeDoc.class);
                     if (doc != null) {
                         merged.put(docId, new SearchHit(doc.getDocId(), doc.getTitle(),
                                 doc.getContent(), 0.8, doc.getSourceFile(), doc.getType()));
