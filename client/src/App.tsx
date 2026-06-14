@@ -145,6 +145,18 @@ export default function App() {
     audioRef.current.play().catch(() => {});
   };
 
+  /** 浏览器内置语音合成（免费、零延迟） */
+  const speakText = (text: string) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel(); // 打断正在播放的语音
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-CN';
+    u.rate = 1.1;
+    u.pitch = 1.0;
+    u.volume = 0.8;
+    window.speechSynthesis.speak(u);
+  };
+
   // === 监听后端消息 ===
   onMessage(useCallback((msg: Message<ServerPayload>) => {
     switch (msg.type) {
@@ -190,6 +202,7 @@ export default function App() {
         if (role === 'assistant') {
           setAssistantText(content.trim());
           setCurrentAgent(payload.agent || null);
+          speakText(trimmed);
         }
         setInterimText('');
         break;
