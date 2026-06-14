@@ -201,7 +201,10 @@ WebSocket JSON 消息，15 种类型（8 C2S + 7 S2C）：
 | 模型 | DeepSeek V3 (deepseek-chat) + 智谱 GLM-4 (flash/4.7) |
 | 视觉分析 | 智谱 GLM-4V (HTTP) |
 | STT | 百度 ASR (REST API) |
-| 会话存储 | Redis (内存双写 + JSON 序列化, TTL 30min) |
+| 会话存储 | Redis + MongoDB (向量持久化) |
+| Embedding | Ollama nomic-embed-text (本地 768 维) |
+| RAG 检索 | KNN 向量 + BM25 关键词 + LLM Rerank |
+| 语音纠错 | glm-4-flash STT 同音词纠正 |
 | 序列化 | Jackson |
 | 代码简化 | Lombok |
 
@@ -212,8 +215,10 @@ WebSocket JSON 消息，15 种类型（8 C2S + 7 S2C）：
 <dependency>spring-boot-starter-web</dependency>
 <dependency>spring-boot-starter-websocket</dependency>
 <dependency>spring-boot-starter-data-redis</dependency>
+<dependency>spring-boot-starter-data-mongodb</dependency>
 <dependency>dev.langchain4j:langchain4j:0.36.2</dependency>
 <dependency>dev.langchain4j:langchain4j-open-ai:0.36.2</dependency>
+<dependency>dev.langchain4j:langchain4j-ollama:0.36.2</dependency>
 ```
 
 ---
@@ -352,17 +357,69 @@ class Orchestrator:
 | 层 | 技术 | 理由 |
 |----|------|------|
 | 客户端框架 | React 18 + TypeScript + Vite | 生态好，Web API 兼容佳 |
-| 视频采集 | MediaStream API (getUserMedia) | 浏览器原生，零依赖 |
-| 音频处理 | Web Audio API + AudioWorklet | 高性能低延迟音频处理 |
-| 帧差检测 | OffscreenCanvas + ImageData | 纯浏览器端，不影响 UI 线程 |
-| VAD | @ricky0123/vad-web (ONNX) | 端侧推理，零成本，隐私安全 |
-| 通信 | WebSocket | 全双工低延迟，单一长连接 |
-| 服务端 | Python FastAPI | 异步支持好，AI SDK 生态全 |
-| Vision | OpenAI GPT-4o-mini | 便宜（$0.15/1M input），视觉能力强 |
-| STT | OpenAI Whisper-1 | $0.006/分钟，准确率高 |
-| Chat | OpenAI GPT-4o | 多模态推理，对话自然 |
-| TTS | OpenAI TTS-1 | $0.015/1K字符，音色自然 |
+| 服务端 | Spring Boot 3.3.1 + Java 17 | WebSocket + REST, LangChain4j 生态 |
+| Vision | 智谱 GLM-4V | 批量帧分析 |
+| STT | 百度 ASR | 流式 PCM 识别 |
+| LLM | DeepSeek V3 + 智谱 GLM-4 | LangChain4j 双模型 Bean |
+| Embedding | Ollama nomic-embed-text | 本地 274MB, 768 维, 零费用 |
+| 知识库 | MongoDB + InMemoryStore | 双存储, 异步入库, 定时扫描 |
 
 ---
 
-*文档版本：v1.0 — 待实现*
+## 四、RAG 知识库架构
+
+### 4.1 入库管线
+
+```
+data/knowledge/*.md ← 管理员放文件
+    │  @Scheduled(30s) 或 POST /reload
+    ▼
+DocumentParser → 解析 .md(front matter)/.json/.txt
+    │
+    ▼
+TextCleaner → 去 Markdown/URL/噪声行
+    │
+    ▼
+DocumentChunker → 500字/块, 50字 overlap
+    │
+    ▼
+OllamaEmbeddingModel → 768维向量
+    │
+    ▼
+┌──────┴──────┐
+InMemoryStore   MongoDB avca_knowledge
+(实时KNN)       (持久化+重启恢复)
+```
+
+### 4.2 检索管线
+
+```
+KNOWLEDGE intent → KnowledgeAgent
+    │
+    ├── QueryRewriter → 3个子查询
+    ├── searchHybrid → KNN + BM25 混合检索
+    ├── Reranker → LLM 打分取 topK=3
+    └── 注入 prompt → LLM 生成回复（带来源标注）
+```
+
+### 4.3 语音纠错
+
+```
+STT "家娃" → SpeechCorrector(glm-4-flash) → "Java" → 前端显示
+```
+
+---
+
+## 五、分支地图
+
+| 分支 | 内容 |
+|------|------|
+| `feat/agent-router` | 6 Agent + DeepSeek/智谱 + 多意图 |
+| `feat/session-memory` | 会话历史压缩 + Agent 回复推送 |
+| `refactor/langchain4j-agent-redis` | LangChain4j 迁移 + 4 Agent + Redis |
+| `feat/rag-ingest` | RAG 文档入库 (解析/清洗/分块/embedding) |
+| `feat/rag-retrieval` | RAG 检索管线 (Query Rewrite/混合检索/Rerank) + 语音纠错 |
+
+---
+
+*文档版本：v3 — 2026-06-14*
