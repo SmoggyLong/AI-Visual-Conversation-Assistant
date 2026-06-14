@@ -138,6 +138,7 @@ export default function App() {
   isSpeakingRef.current = speechState.isSpeaking;
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const welcomedRef = useRef(false);
   const playAudio = (base64Mp3: string) => {
     if (!audioRef.current) audioRef.current = new Audio();
     audioRef.current.src = 'data:audio/mp3;base64,' + base64Mp3;
@@ -164,6 +165,12 @@ export default function App() {
         if (content.startsWith('[INTERIM]')) {
           setInterimText(content.substring(9));
           return;
+        }
+
+        // 欢迎消息去重（React Strict Mode 双挂载导致）
+        if (payload.messageId?.startsWith('welcome_')) {
+          if (welcomedRef.current) break;
+          welcomedRef.current = true;
         }
 
         // 区分 assistant 回复 vs user 识别结果
