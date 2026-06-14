@@ -41,7 +41,7 @@ public class ConversationAgent implements Agent {
     @Override public ChatLanguageModel getSummarizeModel() { return summarizeModel; }
 
     @Override public boolean useSummary() { return false; }
-    @Override public int maxRawTurns() { return 0; }
+    @Override public int maxRawTurns() { return 3; }
     @Override public String fallbackText() { return "嗨，我暂时有点卡，稍等一下哦～"; }
 
     @Override
