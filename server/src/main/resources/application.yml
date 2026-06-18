@@ -1,5 +1,7 @@
 server:
   port: 8080
+  tomcat:
+    max-http-form-post-size: 10MB
 
 spring:
   application:
@@ -8,3 +10,4 @@ spring:
 logging:
   level:
     com.aivca: DEBUG
+    com.aivca.service.stt: DEBUG
