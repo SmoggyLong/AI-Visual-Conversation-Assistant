@@ -1,13 +1,14 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useCamera } from './hooks/useCamera';
 import { useMicrophone } from './hooks/useMicrophone';
 import { useWebSocket } from './hooks/useWebSocket';
-import { useSpeechRecognition } from './hooks/useSpeechRecognition';
+import { useAudioRecorder } from './hooks/useAudioRecorder';
 import { CameraView } from './components/CameraView';
 import { ControlBar } from './components/ControlBar';
 import { StatusIndicator } from './components/StatusIndicator';
 import { SpeechOverlay } from './components/SpeechOverlay';
 import { ConversationPanel, nextMessageId } from './components/ConversationPanel';
+import { captureFrame, hasFrameChanged } from './utils/frameCapture';
 import type {
   ConversationMessage,
   StatusUpdatePayload,
@@ -16,20 +17,13 @@ import type {
 } from './types/messages';
 
 /**
- * AI 视觉对话助手 —— 玻璃拟态风格。
+ * AI 视觉对话助手 —— 流式 STT 版。
  *
- * 布局：
- * ┌──────────────────────────────────────────┐
- * │ StatusIndicator  (h-10)                  │
- * ├────────────────────────┬─────────────────┤
- * │ CameraView (70%)       │ 记录 (30%)       │
- * │                        │                 │
- * │  ┌─────────────────┐   │  [气泡列表]      │
- * │  │ SpeechOverlay   │   │                 │
- * │  └─────────────────┘   │                 │
- * ├────────────────────────┴─────────────────┤
- * │ ControlBar                               │
- * └──────────────────────────────────────────┘
+ * 语音链路（新）：
+ * 麦克风 → useAudioRecorder(PCM) → WebSocket AUDIO_DATA → 后端 Baidu STT
+ *   → 后端 RESPONSE_TEXT 返回 → 前端 ConversationPanel 显示
+ *
+ * Google Web Speech API 已停用，由后端百度服务替换。
  */
 export default function App() {
   const { connectionState, sendMessage, onMessage } = useWebSocket();
@@ -46,46 +40,120 @@ export default function App() {
     onStateChange: (payload) => sendMessage('MICROPHONE_CONTROL', payload),
   });
 
-  const handleFinalResult = useCallback((text: string) => {
-    setConversationMessages((prev) => [...prev, {
-      id: nextMessageId(),
-      role: 'user',
-      text: text.trim(),
-      timestamp: Date.now(),
-    }]);
+  // === 视频帧定时发送（5fps 连续帧 + 环形缓冲）===
+  const prevPixelsRef = useRef<ImageData | null>(null);
+  const frameBufferRef = useRef<{ data: string; checksum: string; timestamp: number }[]>([]);
+  const BUFFER_MAX = 60;  // 保留最近 12 秒（5fps × 12s，覆盖最长一句话）
+  const SEND_COUNT = 5;   // 每次发送最近 1 秒（5 帧）
+
+  useEffect(() => {
+    if (!camera.state.enabled) return;
+    frameBufferRef.current = [];
+
+    const timer = setInterval(() => {
+      if (!camera.videoRef.current) return;
+      const captured = captureFrame(camera.videoRef.current, 480);
+      if (!captured) return;
+
+      const now = Date.now();
+
+      // 帧入缓冲
+      const buf = frameBufferRef.current;
+      buf.push({ data: captured.fullFrame.data!, checksum: captured.fullFrame.imageChecksum!, timestamp: now });
+      if (buf.length > BUFFER_MAX) frameBufferRef.current = buf.slice(-BUFFER_MAX);
+
+      // 帧差检测（说话期间跳过容差，全帧发送）
+      const speaking = isSpeakingRef.current;
+      const changed = hasFrameChanged(captured.thumbPixels, prevPixelsRef.current);
+      prevPixelsRef.current = captured.thumbPixels;
+      if (!speaking && !changed) return;
+
+      // 说话期间发全部缓冲帧，静默时发最近 N 帧
+      const batch = speaking
+        ? frameBufferRef.current.slice()    // 全量
+        : frameBufferRef.current.slice(-SEND_COUNT);  // 最近 5 帧
+      sendMessage('FRAME_DATA', {
+        format: 'jpeg',
+        changed: speaking || changed,
+        isSpeaking: speaking,
+        imageChecksum: captured.fullFrame.imageChecksum,
+        frames: batch.map((f, i) => ({
+          data: f.data,
+          format: 'jpeg',
+          checksum: f.checksum,
+          offsetMs: -(batch.length - 1 - i) * 200,
+        })),
+      });
+    }, 200); // 200ms = 5fps
+
+    return () => clearInterval(timer);
+  }, [camera.state.enabled, sendMessage]);
+
+  // === 音频录制 + VAD 检测 ===
+  const handleAudioChunk = useCallback((base64Pcm: string) => {
+    sendMessage('AUDIO_DATA', {
+      format: 'pcm',
+      sampleRate: 16000,
+      channels: 1,
+      data: base64Pcm,
+      duration: 0.2,
+    });
+  }, [sendMessage]);
+
+  const handleSpeechStart = useCallback(() => {
+    sendMessage('SPEECH_START', { timestamp: Date.now() });
     setInterimText('');
-  }, []);
+  }, [sendMessage]);
 
-  const handleInterimResult = useCallback((text: string) => {
-    setInterimText(text);
-  }, []);
+  const handleSpeechEnd = useCallback(() => {
+    sendMessage('SPEECH_END', { timestamp: Date.now() });
+  }, [sendMessage]);
 
-  const handleRecognitionError = useCallback((error: string) => {
-    setConversationMessages((prev) => [...prev, {
-      id: nextMessageId(),
-      role: 'system',
-      text: error,
-      timestamp: Date.now(),
-    }]);
-  }, []);
-
-  const speechRecognition = useSpeechRecognition({
+  const speechState = useAudioRecorder({
     enabled: microphone.state.enabled,
-    lang: 'zh-CN',
-    onFinalResult: handleFinalResult,
-    onInterimResult: handleInterimResult,
-    onError: handleRecognitionError,
+    stream: microphone.state.stream,
+    onAudioChunk: handleAudioChunk,
+    onSpeechStart: handleSpeechStart,
+    onSpeechEnd: handleSpeechEnd,
   });
+  const isSpeakingRef = useRef(false);
+  isSpeakingRef.current = speechState.isSpeaking;
 
+  // === 监听后端消息 ===
   onMessage(useCallback((msg: Message<ServerPayload>) => {
-    if (msg.type === 'STATUS_UPDATE') {
-      setServerStatus((msg.payload as StatusUpdatePayload).state);
+    switch (msg.type) {
+      case 'STATUS_UPDATE': {
+        setServerStatus((msg.payload as StatusUpdatePayload).state);
+        break;
+      }
+      case 'RESPONSE_TEXT': {
+        const payload = msg.payload as { content: string; messageId: string };
+        const content = payload.content;
+
+        // 中间结果（流式识别进行中）
+        if (content.startsWith('[INTERIM]')) {
+          setInterimText(content.substring(9));
+          return;
+        }
+
+        // 最终结果 → 写入对话记录
+        setConversationMessages((prev) => [
+          ...prev,
+          {
+            id: nextMessageId(),
+            role: 'user',
+            text: content.trim(),
+            timestamp: Date.now(),
+          },
+        ]);
+        setInterimText('');
+        break;
+      }
     }
   }, []));
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
-      {/* 顶部状态栏 */}
       <StatusIndicator
         connectionState={connectionState}
         serverStatus={serverStatus}
@@ -93,25 +161,20 @@ export default function App() {
         micEnabled={microphone.state.enabled}
       />
 
-      {/* 主区域：摄像头 70% + 记录 30% */}
       <div className="flex-1 flex min-h-0">
-        {/* 左侧：摄像头 + 浮字层 */}
         <div className="flex-[7] flex flex-col relative min-w-0">
           <CameraView camera={camera} />
           <SpeechOverlay
             interimText={interimText}
-            isListening={speechRecognition.isListening}
-            isNetworkUnavailable={speechRecognition.isNetworkUnavailable}
+            isListening={microphone.state.enabled}
+            isNetworkUnavailable={false}
           />
         </div>
-
-        {/* 右侧：对话记录 */}
         <div className="flex-[3] min-w-[280px] max-w-[400px]">
           <ConversationPanel messages={conversationMessages} />
         </div>
       </div>
 
-      {/* 底部控制栏 */}
       <ControlBar
         camera={camera}
         microphone={microphone}

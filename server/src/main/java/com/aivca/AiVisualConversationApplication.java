@@ -8,7 +8,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  */
 @SpringBootApplication
 public class AiVisualConversationApplication {
-
     public static void main(String[] args) {
         SpringApplication.run(AiVisualConversationApplication.class, args);
     }
