@@ -30,7 +30,8 @@ export function SpeechOverlay({
       setDisplayText(interimText);
       setVisible(true);
     } else {
-      const timer = setTimeout(() => setVisible(false), 500);
+      // 空文本时延迟 3 秒再隐藏，让最终结果停留一会
+      const timer = setTimeout(() => setVisible(false), 3000);
       return () => clearTimeout(timer);
     }
   }, [interimText]);
@@ -61,7 +62,7 @@ export function SpeechOverlay({
 
       {/* ===== 玻璃字幕条 ===== */}
       {isListening && !isNetworkUnavailable && (
-        <div className="w-full px-6 pb-6">
+        <div className="w-full px-6 pb-6 pointer-events-none">
           <div className={`
             relative rounded-2xl overflow-hidden
             bg-gray-950/30 backdrop-blur-2xl
